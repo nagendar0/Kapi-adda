@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getImageForItem } from '../utils/imageMapper';
 import { useBreakpoint, useScreenProfile } from '../utils/responsive';
+import { fetchSharedOffers, getDefaultOffers, isOfferConfigCategory } from '../utils/sharedOffers';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' 
   ? `http://${window.location.hostname}:8000`
@@ -682,7 +683,7 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
   const [activeCategory, setActiveCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
-  const [offers, setOffers] = useState(null);
+  const [offers, setOffers] = useState(() => getDefaultOffers());
   const [categoriesList, setCategoriesList] = useState([]);
 
   useEffect(() => {
@@ -763,16 +764,50 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
 
     loadOffers();
 
+    const intervalId = setInterval(loadOffers, 5000);
     window.addEventListener('storage', loadOffers);
     window.addEventListener('kapi_offers_updated', loadOffers);
     return () => {
+      clearInterval(intervalId);
       window.removeEventListener('storage', loadOffers);
       window.removeEventListener('kapi_offers_updated', loadOffers);
     };
   }, []);
 
   // ── Fetch menu ──
-  const loadMenu = () => {
+  useEffect(() => {
+    if (HAS_BACKEND_API) return undefined;
+    let cancelled = false;
+
+    const loadSharedOfferState = async () => {
+      try {
+        const data = await fetchSharedOffers();
+        if (!cancelled) {
+          setOffers(data);
+          localStorage.setItem('kapi_daily_offers', JSON.stringify(data));
+        }
+      } catch (err) {
+        console.warn('Shared offer settings unavailable:', err);
+      }
+    };
+
+    loadSharedOfferState();
+    const intervalId = setInterval(loadSharedOfferState, 15000);
+    window.addEventListener('storage', loadSharedOfferState);
+    window.addEventListener('kapi_offers_updated', loadSharedOfferState);
+    window.addEventListener('focus', loadSharedOfferState);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+      window.removeEventListener('storage', loadSharedOfferState);
+      window.removeEventListener('kapi_offers_updated', loadSharedOfferState);
+      window.removeEventListener('focus', loadSharedOfferState);
+    };
+  }, []);
+
+  const loadMenu = (isPolling = false) => {
+    if (!isPolling) setLoading(true);
     if (!HAS_BACKEND_API) {
       Promise.all([
         fetch(`${SUPABASE_URL}/rest/v1/categories?select=*`, { headers: SUPABASE_HEADERS }),
@@ -781,9 +816,13 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
         .then(async ([categoriesResponse, itemsResponse]) => {
           if (!categoriesResponse.ok || !itemsResponse.ok) throw new Error('Unable to load menu data');
           const [categoryRows, itemRows] = await Promise.all([categoriesResponse.json(), itemsResponse.json()]);
-          const categoryMap = Object.fromEntries((categoryRows || []).map((category) => [category.id, category.name]));
-          setCategoriesList((categoryRows || []).filter((category) => !(category.description || '').endsWith('[HIDDEN]')).map((category) => category.name));
-          setMenuItems((itemRows || []).filter((item) => !(categoryRows || []).some((category) => category.id === item.category_id && (category.description || '').endsWith('[HIDDEN]'))).map((item) => ({
+          const publicCategories = (categoryRows || []).filter((category) =>
+            !isOfferConfigCategory(category) && !(category.description || '').endsWith('[HIDDEN]')
+          );
+          const publicCategoryIds = new Set(publicCategories.map((category) => category.id));
+          const categoryMap = Object.fromEntries(publicCategories.map((category) => [category.id, category.name]));
+          setCategoriesList(publicCategories.map((category) => category.name));
+          setMenuItems((itemRows || []).filter((item) => publicCategoryIds.has(item.category_id)).map((item) => ({
             ...item,
             category: categoryMap[item.category_id] || 'Menu',
             is_available: item.availability_status !== 'out_of_stock',
@@ -793,7 +832,7 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
           console.warn('Supabase menu fallback unavailable:', err);
           setError('Could not load menu. Please try again.');
         })
-        .finally(() => setLoading(false));
+        .finally(() => { if (!isPolling) setLoading(false); });
       return;
     }
     fetch(`${API_BASE}/api/menu?t=` + Date.now())
@@ -822,14 +861,17 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
         console.error('Menu fetch error:', err);
         setError('Could not load menu. Please try again.');
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!isPolling) setLoading(false); });
   };
 
   useEffect(() => {
-    loadMenu();
-    window.addEventListener('kapi_menu_updated', loadMenu);
+    loadMenu(false);
+    const interval = setInterval(() => loadMenu(true), 5000);
+    const handleMenuEvent = () => loadMenu(false);
+    window.addEventListener('kapi_menu_updated', handleMenuEvent);
     return () => {
-      window.removeEventListener('kapi_menu_updated', loadMenu);
+      clearInterval(interval);
+      window.removeEventListener('kapi_menu_updated', handleMenuEvent);
     };
   }, []);
 

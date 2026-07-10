@@ -31,7 +31,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
-    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_origin_regex=r"https://.*\.vercel\.app|http://.*",
     allow_credentials=True,
     allow_headers=["*"],
     allow_methods=["*"],
@@ -1568,6 +1568,8 @@ def get_reviews(menu_item_id: str):
         "reviews": reviews
     }
 
+OFFERS_FILE = os.path.join(os.path.dirname(__file__), "data", "offers.json")
+
 DEFAULT_OFFERS = {
     "1": {
         "dayName": "Monday",
@@ -1623,7 +1625,7 @@ DEFAULT_OFFERS = {
 @app.post("/api/admin/offers")
 def save_offers(body: dict, current_user: dict = Depends(verify_admin)):
     try:
-        with open("offers.json", "w", encoding="utf-8") as f:
+        with open(OFFERS_FILE, "w", encoding="utf-8") as f:
             json.dump(body, f, indent=4, ensure_ascii=False)
         return {"message": "Offers updated successfully."}
     except Exception as e:
@@ -1631,9 +1633,9 @@ def save_offers(body: dict, current_user: dict = Depends(verify_admin)):
 
 @app.get("/api/offers")
 def get_offers():
-    if os.path.exists("offers.json"):
+    if os.path.exists(OFFERS_FILE):
         try:
-            with open("offers.json", "r", encoding="utf-8") as f:
+            with open(OFFERS_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             pass
@@ -2074,9 +2076,9 @@ def _chat_assistant_logic(msg: str, user_id: Optional[str], session_id: Optional
 
     # Load active offers from offers.json or DEFAULT_OFFERS
     offers = DEFAULT_OFFERS
-    if os.path.exists("offers.json"):
+    if os.path.exists(OFFERS_FILE):
         try:
-            with open("offers.json", "r", encoding="utf-8") as f:
+            with open(OFFERS_FILE, "r", encoding="utf-8") as f:
                 offers = json.load(f)
         except Exception:
             pass

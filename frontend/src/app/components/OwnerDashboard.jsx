@@ -4,11 +4,12 @@ import { useState, useEffect, useRef } from 'react';
 import ProfileCard from './ProfileCard';
 import { getImageForItem } from '../utils/imageMapper';
 import { useBreakpoint, useScreenProfile } from '../utils/responsive';
+import { fetchSharedOffers, getDefaultOffers, isOfferConfigCategory, saveSharedOffers } from '../utils/sharedOffers';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' 
   ? `http://${window.location.hostname}:8000`
   : 'http://127.0.0.1:8000');
-const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname));
+const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && !window.location.hostname.includes('.vercel.app'));
 
 const SUPABASE_URL = "https://kvjvnrktnkenlsaatmxq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2anZucmt0bmtlbmxzYWF0bXhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo";
@@ -119,7 +120,7 @@ export default function OwnerDashboard({
     rating: '4.5',
     pieces: ''
   });
-  const [offers, setOffers] = useState(null);
+  const [offers, setOffers] = useState(() => getDefaultOffers());
 
   useEffect(() => {
     const DEFAULT_OFFERS = {
@@ -197,6 +198,52 @@ export default function OwnerDashboard({
       });
   }, []);
 
+  useEffect(() => {
+    if (HAS_BACKEND_API) return undefined;
+    let cancelled = false;
+
+    const loadSharedOfferState = async () => {
+      try {
+        const data = await fetchSharedOffers();
+        if (!cancelled) {
+          setOffers(data);
+          localStorage.setItem('kapi_daily_offers', JSON.stringify(data));
+        }
+      } catch (err) {
+        console.warn('Shared offer settings unavailable:', err);
+      }
+    };
+
+    loadSharedOfferState();
+    const intervalId = setInterval(loadSharedOfferState, 15000);
+    window.addEventListener('storage', loadSharedOfferState);
+    window.addEventListener('kapi_offers_updated', loadSharedOfferState);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+      window.removeEventListener('storage', loadSharedOfferState);
+      window.removeEventListener('kapi_offers_updated', loadSharedOfferState);
+    };
+  }, []);
+
+  const persistOffers = async (updated) => {
+    localStorage.setItem('kapi_daily_offers', JSON.stringify(updated));
+
+    if (HAS_BACKEND_API) {
+      const res = await fetchAdmin(`${API_BASE}/api/admin/offers`, {
+        method: 'POST',
+        body: JSON.stringify(updated)
+      });
+      if (!res.ok) throw new Error(`Backend offer sync failed: ${res.status}`);
+      window.dispatchEvent(new Event('kapi_offers_updated'));
+      return;
+    }
+
+    await saveSharedOffers(updated);
+    window.dispatchEvent(new Event('kapi_offers_updated'));
+  };
+
   const handleUpdateOfferImage = async (dayId, base64Image) => {
     const updated = {
       ...offers,
@@ -207,15 +254,11 @@ export default function OwnerDashboard({
       }
     };
     setOffers(updated);
-    localStorage.setItem('kapi_daily_offers', JSON.stringify(updated));
-    window.dispatchEvent(new Event('kapi_offers_updated'));
     try {
-      await fetchAdmin(`${API_BASE}/api/admin/offers`, {
-        method: 'POST',
-        body: JSON.stringify(updated)
-      });
+      await persistOffers(updated);
     } catch (err) {
-      console.error('Failed to sync offer image to backend:', err);
+      console.error('Failed to sync offer image:', err);
+      showToast('Failed to save offer image. Please try again.', 'error');
     }
   };
 
@@ -225,12 +268,10 @@ export default function OwnerDashboard({
     }
     syncTimeoutRef.current = setTimeout(async () => {
       try {
-        await fetchAdmin(`${API_BASE}/api/admin/offers`, {
-          method: 'POST',
-          body: JSON.stringify(data)
-        });
+        await persistOffers(data);
       } catch (err) {
-        console.error('Failed to sync offers to backend:', err);
+        console.error('Failed to sync offers:', err);
+        showToast('Failed to save offer changes. Please try again.', 'error');
       }
     }, 800);
   };
@@ -246,8 +287,6 @@ export default function OwnerDashboard({
       }
     };
     setOffers(updated);
-    localStorage.setItem('kapi_daily_offers', JSON.stringify(updated));
-    window.dispatchEvent(new Event('kapi_offers_updated'));
     debouncedSyncOffers(updated);
   };
 
@@ -260,15 +299,11 @@ export default function OwnerDashboard({
       }
     };
     setOffers(updated);
-    localStorage.setItem('kapi_daily_offers', JSON.stringify(updated));
-    window.dispatchEvent(new Event('kapi_offers_updated'));
     try {
-      await fetchAdmin(`${API_BASE}/api/admin/offers`, {
-        method: 'POST',
-        body: JSON.stringify(updated)
-      });
+      await persistOffers(updated);
     } catch (err) {
-      console.error('Failed to sync offer removal to backend:', err);
+      console.error('Failed to sync offer removal:', err);
+      showToast('Failed to remove offer. Please try again.', 'error');
     }
   };
   const fetchAdmin = async (url, options = {}) => {
@@ -287,13 +322,33 @@ export default function OwnerDashboard({
     });
   };
 
+  const supabaseRequest = async (table, { method = 'GET', query = 'select=*', body } = {}) => {
+    const headers = {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    };
+    const request = { method, headers };
+
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      headers.Prefer = 'return=representation';
+      request.body = JSON.stringify(body);
+    }
+
+    return fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, request);
+  };
+
+  const responseError = async (res, fallback) => {
+    try {
+      const data = await res.json();
+      return data?.detail || data?.message || data?.hint || fallback;
+    } catch {
+      return fallback;
+    }
+  };
+
   const fetchSupabaseTable = async (table, query = 'select=*') => {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
-      headers: {
-        apikey: SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-      },
-    });
+    const res = await supabaseRequest(table, { query });
     if (!res.ok) {
       throw new Error(`Supabase ${table} fetch failed: ${res.status}`);
     }
@@ -307,6 +362,12 @@ export default function OwnerDashboard({
       description: String(description).slice(0, match.index).trim(),
       pieces: match[1],
     };
+  };
+
+  const formatPiecesIntoDesc = (description = '', pieces = '') => {
+    const cleanDescription = extractPiecesFromDesc(description).description.trim();
+    const cleanPieces = String(pieces || '').trim();
+    return cleanPieces ? `${cleanDescription} [Pieces: ${cleanPieces}]` : cleanDescription;
   };
 
   const normalizeMenuItem = (item, reviewsMap = {}) => {
@@ -355,7 +416,8 @@ export default function OwnerDashboard({
       reviewsMap[itemId].push(rating);
     });
 
-    const groups = (cats || []).map((cat) => ({
+    const menuCategories = (cats || []).filter((cat) => !isOfferConfigCategory(cat));
+    const groups = menuCategories.map((cat) => ({
       id: cat.id,
       category: cat.name,
       description: cat.description,
@@ -364,7 +426,7 @@ export default function OwnerDashboard({
         .map(item => normalizeMenuItem(item, reviewsMap)),
     }));
 
-    loadMenuGroups(groups, cats || []);
+    loadMenuGroups(groups, menuCategories);
   };
 
   // Fetch functions
@@ -1179,6 +1241,61 @@ export default function OwnerDashboard({
   const normalizeVoiceText = (text) =>
     String(text || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
+  const buildDeployedVoiceResponse = (queryText, lang = 'en') => {
+    const query = normalizeVoiceText(queryText);
+    const isTelugu = lang === 'te' || /[\u0C00-\u0C7F]/.test(queryText || '');
+    const availableItems = flatMenu.filter(item => item.availability_status !== 'out_of_stock');
+    const outOfStockItems = flatMenu.filter(item => item.availability_status === 'out_of_stock');
+    const productMatch = flatMenu.find((item) => {
+      const name = normalizeVoiceText(item.name);
+      if (!name) return false;
+      if (query.includes(name)) return true;
+      return name.split(/\s+/).some(token => token.length > 3 && query.includes(token));
+    });
+    const hasAny = (...terms) => terms.some(term => query.includes(term));
+
+    let text;
+    if (productMatch) {
+      const available = productMatch.availability_status !== 'out_of_stock';
+      text = isTelugu
+        ? `${productMatch.name} ${available ? 'ప్రస్తుతం అందుబాటులో ఉంది' : 'ప్రస్తుతం స్టాక్ లో లేదు'}. ధర Rs.${productMatch.price || 0}.`
+        : `${productMatch.name} is ${available ? 'available' : 'currently out of stock'} at Rs.${productMatch.price || 0}.`;
+    } else if (hasAny('stock', 'inventory', 'available', 'out of stock', 'స్టాక్', 'అందుబాట')) {
+      const topOut = outOfStockItems.slice(0, 5).map(item => item.name).join(', ');
+      text = isTelugu
+        ? `ప్రస్తుతం ${availableItems.length} ఉత్పత్తులు అందుబాటులో ఉన్నాయి. ${topOut ? `స్టాక్ లో లేని వాటిలో ${topOut}.` : 'అన్ని ప్రధాన వస్తువులు అందుబాటులో ఉన్నాయి.'}`
+        : `${availableItems.length} items are available right now. ${topOut ? `Out of stock: ${topOut}.` : 'All key items are currently available.'}`;
+    } else if (hasAny('menu', 'product', 'item', 'price', 'category', 'మెను', 'ఉత్పత్తి', 'ధర')) {
+      const categoriesCount = new Set(flatMenu.map(item => item.category).filter(Boolean)).size;
+      const samples = availableItems.slice(0, 5).map(item => `${item.name} Rs.${item.price || 0}`).join(', ');
+      text = isTelugu
+        ? `మెనులో ${flatMenu.length} ఉత్పత్తులు, ${categoriesCount} కేటగిరీలు ఉన్నాయి. ${samples ? `కొన్ని అందుబాటులో ఉన్నవి: ${samples}.` : ''}`
+        : `The menu has ${flatMenu.length} items across ${categoriesCount} categories. ${samples ? `Available picks include ${samples}.` : ''}`;
+    } else if (hasAny('customer', 'user', 'online', 'login', 'వినియోగదార', 'కస్టమర్')) {
+      const online = adminUsers.filter(customer => customer.is_online).length;
+      text = isTelugu
+        ? `ప్రస్తుతం ${adminUsers.length} కస్టమర్లు కనిపిస్తున్నారు. ${online} మంది ఇప్పుడు ఆన్‌లైన్‌లో ఉన్నారు.`
+        : `I can see ${adminUsers.length} customer records, with ${online} online right now.`;
+    } else if (hasAny('sales', 'revenue', 'orders', 'income', 'ఆదాయం', 'అమ్మకాలు', 'ఆర్డర్')) {
+      const revenue = dashboardData?.total_revenue ?? dashboardData?.revenue ?? 0;
+      const orders = dashboardData?.total_orders ?? dashboardData?.orders ?? 0;
+      text = isTelugu
+        ? `ప్రస్తుత డ్యాష్‌బోర్డ్ ప్రకారం ఆదాయం Rs.${revenue}, ఆర్డర్లు ${orders}.`
+        : `Current dashboard figures show Rs.${revenue} revenue and ${orders} orders.`;
+    } else if (hasAny('analytics', 'trend', 'demand', 'insight', 'అనలిటిక్స్')) {
+      const alert = analytics?.demand_alerts?.[0];
+      text = isTelugu
+        ? (alert ? `ప్రధాన ఇన్‌సైట్: ${alert}` : 'ఇంకా సరిపడా కస్టమర్ డేటా లేదు. డేటా వచ్చినప్పుడు ఇన్‌సైట్లు కనిపిస్తాయి.')
+        : (alert || 'There is not enough customer activity yet. Analytics will update as customers browse and order.');
+    } else {
+      text = isTelugu
+        ? `మీ ప్రశ్నను అర్థం చేసుకున్నాను. మెను, స్టాక్, కస్టమర్లు లేదా ఆఫర్ల గురించి అడగండి. ప్రస్తుతం ${availableItems.length} వస్తువులు అందుబాటులో ఉన్నాయి.`
+        : `I understood your question. Ask me about menu, stock, customers, offers, or sales. Right now ${availableItems.length} items are available.`;
+    }
+
+    return { text, voice: text, lang: isTelugu ? 'te' : 'en' };
+  };
+
   const handleVoiceQuerySubmit = async (queryText, queryLang = voiceLang) => {
     if (!queryText || !queryText.trim()) return;
 
@@ -1219,12 +1336,17 @@ export default function OwnerDashboard({
 
     try {
       const effectiveLang = queryLang || voiceLang || 'en';
-      const res = await fetchAdmin(`${API_BASE}/api/ai/voice?speech_text=${encodeURIComponent(cleanQuery)}&lang=${encodeURIComponent(effectiveLang)}`);
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || `Server error ${res.status}`);
+      let data;
+      if (HAS_BACKEND_API) {
+        const res = await fetchAdmin(`${API_BASE}/api/ai/voice?speech_text=${encodeURIComponent(cleanQuery)}&lang=${encodeURIComponent(effectiveLang)}`);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || `Server error ${res.status}`);
+        }
+        data = await res.json();
+      } else {
+        data = buildDeployedVoiceResponse(cleanQuery, effectiveLang);
       }
-      const data = await res.json();
       const replyText = data.text || data.reply || 'No response from AI.';
       const spokenReply = data.voice || replyText;
       const botMessage = { role: 'bot', text: replyText, timestamp: new Date().toLocaleTimeString() };
@@ -1235,7 +1357,7 @@ export default function OwnerDashboard({
       }
 
       // Speak the response aloud
-      if (effectiveLang !== 'en' && typeof window !== 'undefined') {
+      if (effectiveLang !== 'en' && HAS_BACKEND_API && typeof window !== 'undefined') {
         try {
           if (window.speechSynthesis) window.speechSynthesis.cancel();
           setIsSpeaking(true);
@@ -1371,45 +1493,27 @@ export default function OwnerDashboard({
     try {
       let url = `${API_BASE}/api/admin/menu`;
       let method = 'POST';
+      let query = 'select=*';
+      const { pieces, ...supabasePayload } = payload;
+      supabasePayload.description = formatPiecesIntoDesc(payload.description, pieces);
       
       if (editingMenuItem) {
         url = `${API_BASE}/api/admin/menu/${editingMenuItem.id}`;
         method = 'PATCH';
+        query = `id=eq.${encodeURIComponent(editingMenuItem.id)}&select=*`;
       }
 
-      const res = await fetchAdmin(url, {
-        method,
-        body: JSON.stringify(payload)
-      });
+      const res = HAS_BACKEND_API
+        ? await fetchAdmin(url, {
+            method,
+            body: JSON.stringify(payload)
+          })
+        : await supabaseRequest('menu_items', { method, query, body: supabasePayload });
 
       if (res.ok) {
         showToast(editingMenuItem ? 'Menu item updated successfully!' : 'Menu item created successfully!');
-        
-        if (editingMenuItem) {
-          // Find category name corresponding to category_id
-          const selectedCat = categories.find(c => c.id === menuForm.category_id);
-          const categoryName = selectedCat ? selectedCat.name : '';
-
-          const updatedItem = {
-            ...editingMenuItem,
-            name: menuForm.name,
-            description: menuForm.description,
-            category_id: menuForm.category_id,
-            category: categoryName,
-            price: parseFloat(menuForm.price),
-            availability_status: menuForm.availability_status,
-            image_url: menuForm.image_url,
-            prep_time: parseInt(menuForm.prep_time || '5'),
-            rating: parseFloat(menuForm.rating || '4.5'),
-            pieces: menuForm.pieces || null
-          };
-
-          setFlatMenu(prevMenu => 
-            prevMenu.map(m => m.id === editingMenuItem.id ? updatedItem : m)
-          );
-        } else {
-          fetchMenu();
-        }
+        await fetchMenu();
+        window.dispatchEvent(new Event('kapi_menu_updated'));
 
         setShowAddMenuForm(false);
         setEditingMenuItem(null);
@@ -1425,8 +1529,8 @@ export default function OwnerDashboard({
           pieces: ''
         });
       } else {
-        const errData = await res.json();
-        showToast(`Error: ${errData.detail || 'Failed to save menu item'}`, 'error');
+        const message = await responseError(res, 'Failed to save menu item');
+        showToast(`Error: ${message}`, 'error');
       }
     } catch (err) {
       console.error('Error saving menu item:', err);
@@ -1447,17 +1551,20 @@ export default function OwnerDashboard({
       description: categoryForm.description.trim()
     };
     try {
-      const res = await fetchAdmin(`${API_BASE}/api/admin/categories`, {
-        method: 'POST',
-        body: JSON.stringify(payload)
-      });
+      const res = HAS_BACKEND_API
+        ? await fetchAdmin(`${API_BASE}/api/admin/categories`, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          })
+        : await supabaseRequest('categories', { method: 'POST', query: 'select=*', body: payload });
       if (res.ok) {
         showToast('Category created successfully!');
         setCategoryForm({ name: '', description: '' });
-        fetchMenu();
+        await fetchMenu();
+        window.dispatchEvent(new Event('kapi_menu_updated'));
       } else {
-        const errData = await res.json();
-        showToast(`Error: ${errData.detail || 'Failed to create category'}`, 'error');
+        const message = await responseError(res, 'Failed to create category');
+        showToast(`Error: ${message}`, 'error');
       }
     } catch (err) {
       console.error('Error creating category:', err);
@@ -1486,18 +1593,25 @@ export default function OwnerDashboard({
     };
 
     try {
-      const res = await fetchAdmin(`${API_BASE}/api/admin/categories/${cat.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify(payload)
-      });
+      const res = HAS_BACKEND_API
+        ? await fetchAdmin(`${API_BASE}/api/admin/categories/${cat.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify(payload)
+          })
+        : await supabaseRequest('categories', {
+            method: 'PATCH',
+            query: `id=eq.${encodeURIComponent(cat.id)}&select=*`,
+            body: payload
+          });
       if (!res.ok) {
         setCategories(prevCats => 
           prevCats.map(c => c.id === cat.id ? cat : c)
         );
-        const errData = await res.json();
-        showToast(`Failed to update category visibility: ${errData.detail || 'Error'}`, 'error');
+        const message = await responseError(res, 'Error');
+        showToast(`Failed to update category visibility: ${message}`, 'error');
       } else {
-        fetchMenu();
+        await fetchMenu();
+        window.dispatchEvent(new Event('kapi_menu_updated'));
       }
     } catch (err) {
       console.error('Error updating category visibility:', err);
@@ -1518,22 +1632,40 @@ export default function OwnerDashboard({
     setFlatMenu(prevMenu => prevMenu.filter(m => m.category_id !== catId));
 
     try {
-      const res = await fetchAdmin(`${API_BASE}/api/admin/categories/${catId}`, {
-        method: 'DELETE'
-      });
+      let res;
+      if (HAS_BACKEND_API) {
+        res = await fetchAdmin(`${API_BASE}/api/admin/categories/${catId}`, {
+          method: 'DELETE'
+        });
+      } else {
+        const itemDeleteRes = await supabaseRequest('menu_items', {
+          method: 'DELETE',
+          query: `category_id=eq.${encodeURIComponent(catId)}`
+        });
+        if (!itemDeleteRes.ok) {
+          const message = await responseError(itemDeleteRes, 'Failed to delete category products');
+          throw new Error(message);
+        }
+        res = await supabaseRequest('categories', {
+          method: 'DELETE',
+          query: `id=eq.${encodeURIComponent(catId)}`
+        });
+      }
       if (!res.ok) {
         setCategories(originalCats);
         setFlatMenu(originalMenu);
-        const errData = await res.json();
-        showToast(`Failed to delete category: ${errData.detail || 'Error'}`, 'error');
+        const message = await responseError(res, 'Error');
+        showToast(`Failed to delete category: ${message}`, 'error');
       } else {
         showToast('Category and its products deleted successfully!');
-        fetchMenu();
+        await fetchMenu();
+        window.dispatchEvent(new Event('kapi_menu_updated'));
       }
     } catch (err) {
       console.error('Error deleting category:', err);
       setCategories(originalCats);
       setFlatMenu(originalMenu);
+      showToast(`Failed to delete category: ${err.message || err}`, 'error');
     }
   };
 
@@ -1558,17 +1690,26 @@ export default function OwnerDashboard({
     };
 
     try {
-      const res = await fetchAdmin(`${API_BASE}/api/admin/menu/${item.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify(payload)
-      });
+      const res = HAS_BACKEND_API
+        ? await fetchAdmin(`${API_BASE}/api/admin/menu/${item.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify(payload)
+          })
+        : await supabaseRequest('menu_items', {
+            method: 'PATCH',
+            query: `id=eq.${encodeURIComponent(item.id)}&select=*`,
+            body: { availability_status: newStatus }
+          });
       if (!res.ok) {
         // Rollback state
         setFlatMenu(prevMenu => 
           prevMenu.map(m => m.id === item.id ? { ...m, availability_status: item.availability_status } : m)
         );
-        const errData = await res.json();
-        showToast(`Failed to update stock status: ${errData.detail || 'Error'}`, 'error');
+        const message = await responseError(res, 'Error');
+        showToast(`Failed to update stock status: ${message}`, 'error');
+      } else {
+        await fetchMenu();
+        window.dispatchEvent(new Event('kapi_menu_updated'));
       }
     } catch (err) {
       console.error('Error toggling availability:', err);
@@ -1576,6 +1717,7 @@ export default function OwnerDashboard({
       setFlatMenu(prevMenu => 
         prevMenu.map(m => m.id === item.id ? { ...m, availability_status: item.availability_status } : m)
       );
+      showToast(`Failed to update stock status: ${err.message || err}`, 'error');
     }
   };
 
@@ -1588,19 +1730,29 @@ export default function OwnerDashboard({
     setFlatMenu(prevMenu => prevMenu.filter(m => m.id !== id));
 
     try {
-      const res = await fetchAdmin(`${API_BASE}/api/admin/menu/${id}`, {
-        method: 'DELETE'
-      });
+      const res = HAS_BACKEND_API
+        ? await fetchAdmin(`${API_BASE}/api/admin/menu/${id}`, {
+            method: 'DELETE'
+          })
+        : await supabaseRequest('menu_items', {
+            method: 'DELETE',
+            query: `id=eq.${encodeURIComponent(id)}`
+          });
       if (!res.ok) {
         // Rollback state
         setFlatMenu(originalMenu);
-        const errData = await res.json();
-        showToast(`Failed to delete menu item: ${errData.detail || 'Error'}`, 'error');
+        const message = await responseError(res, 'Error');
+        showToast(`Failed to delete menu item: ${message}`, 'error');
+      } else {
+        showToast('Menu item deleted successfully!');
+        await fetchMenu();
+        window.dispatchEvent(new Event('kapi_menu_updated'));
       }
     } catch (err) {
       console.error('Error deleting menu item:', err);
       // Rollback state
       setFlatMenu(originalMenu);
+      showToast(`Failed to delete menu item: ${err.message || err}`, 'error');
     }
   };
 

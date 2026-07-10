@@ -19,7 +19,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined'
   ? `http://${window.location.hostname}:8000`
   : 'http://127.0.0.1:8000');
-const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname));
+const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && !window.location.hostname.includes('.vercel.app'));
 
 // Cookie helper functions
 const getCookie = (name) => {

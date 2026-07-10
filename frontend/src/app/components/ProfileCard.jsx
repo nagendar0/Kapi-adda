@@ -4,7 +4,7 @@ import { PasswordChecklist } from './PremiumAuth';
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' 
   ? `http://${window.location.hostname}:8000`
   : 'http://127.0.0.1:8000');
-const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname));
+const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && !window.location.hostname.includes('.vercel.app'));
 const SUPABASE_URL = 'https://kvjvnrktnkenlsaatmxq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo';
 
@@ -49,6 +49,9 @@ export default function ProfileCard({ user, onUserUpdate, onSuccessRedirect, onL
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState('');
   const [profileSuccess, setProfileSuccess] = useState('');
+  useEffect(() => {
+    setName(user?.name || '');
+  }, [user?.name]);
   const [avatar, setAvatar] = useState('initials');
   const [avatarImg, setAvatarImg] = useState('');
   const fileInputRef = useRef(null);
@@ -141,19 +144,41 @@ export default function ProfileCard({ user, onUserUpdate, onSuccessRedirect, onL
     setProfileLoading(true);
     try {
       if (!HAS_BACKEND_API) {
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/users?id=eq.${encodeURIComponent(user.id)}`, {
-          method: 'PATCH',
-          headers: {
-            apikey: SUPABASE_ANON_KEY,
-            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-            'Content-Type': 'application/json',
-            Prefer: 'return=representation',
-          },
-          body: JSON.stringify({ name: name.trim() }),
-        });
-        const rows = await res.json();
-        if (!res.ok || !Array.isArray(rows) || !rows[0]) throw new Error('Failed to update profile');
-        const updatedUser = { ...user, ...rows[0] };
+        const patchProfile = async (filter) => {
+          const res = await fetch(`${SUPABASE_URL}/rest/v1/users?${filter}`, {
+            method: 'PATCH',
+            headers: {
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+              'Content-Type': 'application/json',
+              Prefer: 'return=representation',
+            },
+            body: JSON.stringify({ name: name.trim() }),
+          });
+          const text = await res.text();
+          let rows = [];
+          try {
+            rows = text ? JSON.parse(text) : [];
+          } catch {
+            rows = [];
+          }
+          if (!res.ok) {
+            throw new Error(text || 'Failed to update profile');
+          }
+          return Array.isArray(rows) ? rows : [];
+        };
+
+        let rows = [];
+        if (user?.id) {
+          rows = await patchProfile(`id=eq.${encodeURIComponent(user.id)}`);
+        }
+        if ((!rows || !rows[0]) && user?.email) {
+          rows = await patchProfile(`email=eq.${encodeURIComponent(String(user.email).trim().toLowerCase())}`);
+        }
+        if (!rows || !rows[0]) {
+          throw new Error('Account record not found. Please sign in again.');
+        }
+        const updatedUser = { ...user, ...rows[0], name: rows[0].name || name.trim() };
         setProfileSuccess('Name updated successfully!');
         setCookie("kapi_user", JSON.stringify(updatedUser), 7);
         localStorage.setItem("kapi_user", JSON.stringify(updatedUser));
@@ -165,7 +190,7 @@ export default function ProfileCard({ user, onUserUpdate, onSuccessRedirect, onL
         token = `jwt_mock_token_for_${user.id}`;
       }
       const res = await fetch(`${BACKEND_URL}/api/users/profile`, {
-        method: "PATCH",
+        method: 'PATCH',
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
@@ -185,7 +210,7 @@ export default function ProfileCard({ user, onUserUpdate, onSuccessRedirect, onL
       }
     } catch (err) {
       console.error(err);
-      setProfileError('Connection error.');
+      setProfileError(err.message || 'Connection error.');
     } finally {
       setProfileLoading(false);
     }

@@ -7,7 +7,7 @@ import { useScreenProfile } from '../utils/responsive';
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' 
   ? `http://${window.location.hostname}:8000`
   : 'http://127.0.0.1:8000');
-const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname));
+const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && !window.location.hostname.includes('.vercel.app'));
 const SUPABASE_URL = 'https://kvjvnrktnkenlsaatmxq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2anZucmt0bmtlbmxzYWF0bXhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo';
 const SUPABASE_HEADERS = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` };
@@ -312,9 +312,9 @@ export default function FoodCatalog({ user, onViewFood, onAddToCart, cart, onOpe
   const [categoriesList, setCategoriesList] = useState([]);
 
   // Fetch menu
-  const fetchMenu = async () => {
+  const fetchMenu = async (isPolling = false) => {
     try {
-      setLoading(true);
+      if (!isPolling) setLoading(true);
       setError(null);
       if (!HAS_BACKEND_API) {
         const [categoriesResponse, itemsResponse] = await Promise.all([
@@ -357,15 +357,18 @@ export default function FoodCatalog({ user, onViewFood, onAddToCart, cart, onOpe
     } catch (err) {
       setError(err.message || 'Failed to load menu');
     } finally {
-      setLoading(false);
+      if (!isPolling) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchMenu();
-    window.addEventListener('kapi_menu_updated', fetchMenu);
+    fetchMenu(false);
+    const interval = setInterval(() => fetchMenu(true), 5000);
+    const handleMenuEvent = () => fetchMenu(false);
+    window.addEventListener('kapi_menu_updated', handleMenuEvent);
     return () => {
-      window.removeEventListener('kapi_menu_updated', fetchMenu);
+      clearInterval(interval);
+      window.removeEventListener('kapi_menu_updated', handleMenuEvent);
     };
   }, []);
 
