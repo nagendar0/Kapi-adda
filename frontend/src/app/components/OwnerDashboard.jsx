@@ -847,7 +847,8 @@ export default function OwnerDashboard({
             window._voiceProcessing = false;
             setIsListening(false);
             setVoiceQuery('');
-            setVoiceError('No speech detected. Tap the microphone and try again.');
+            // Silence is a normal end state for tap-to-talk, not a system error.
+            setVoiceError('');
           } else if (event.error === 'aborted') {
             setIsListening(false);
           } else {
@@ -1321,6 +1322,199 @@ export default function OwnerDashboard({
     return overlap / heardTokens.length >= 0.75;
   };
 
+  const fetchLiveVoiceAgentData = async () => {
+    const read = (table, query = 'select=*') =>
+      fetchSupabaseTable(table, query).catch((error) => {
+        console.warn(`Voice agent could not load ${table}:`, error);
+        return [];
+      });
+
+    const [rawCategories, rawItems, orders, expensesData, inventoryData, reviewsData, activityLogs, usersData, liveOffers] = await Promise.all([
+      read('categories', 'select=*'),
+      read('menu_items', 'select=*'),
+      read('orders', 'select=*'),
+      read('expenses', 'select=*'),
+      read('inventory', 'select=*'),
+      read('reviews', 'select=*'),
+      read('user_activity_logs', 'select=*'),
+      read('users', 'select=*'),
+      fetchSharedOffers().catch((error) => {
+        console.warn('Voice agent could not load offers:', error);
+        return offers;
+      }),
+    ]);
+
+    const categoriesData = (rawCategories || []).filter((category) => !isOfferConfigCategory(category));
+    const categoryNames = Object.fromEntries(
+      categoriesData.map((category) => [category.id, category.name || 'Uncategorized'])
+    );
+    const ratingsByItem = {};
+    (reviewsData || []).forEach((review) => {
+      const rating = Number(review.rating);
+      if (!review.menu_item_id || !Number.isFinite(rating)) return;
+      if (!ratingsByItem[review.menu_item_id]) ratingsByItem[review.menu_item_id] = [];
+      ratingsByItem[review.menu_item_id].push(rating);
+    });
+
+    const items = (rawItems || []).map((item) => ({
+      ...normalizeMenuItem(item, ratingsByItem),
+      category: categoryNames[item.category_id] || 'Uncategorized',
+    }));
+
+    return {
+      categories: categoriesData,
+      items,
+      orders: orders || [],
+      expenses: expensesData || [],
+      inventory: inventoryData || [],
+      reviews: reviewsData || [],
+      logs: activityLogs || [],
+      users: usersData || [],
+      offers: liveOffers || offers,
+    };
+  };
+
+  const buildLiveDatabaseVoiceResponse = async (queryText, lang = 'en') => {
+    const query = normalizeVoiceText(queryText);
+    const isTelugu = lang === 'te' || /[\u0C00-\u0C7F]/.test(queryText || '');
+    const live = await fetchLiveVoiceAgentData();
+    const { categories: liveCategories, items, orders: allOrders, expenses: allExpenses, inventory: liveInventory, reviews: liveReviews, logs, users: liveUsers, offers: liveOffers } = live;
+    const hasAny = (...terms) => terms.some((term) => query.includes(term));
+    const asNumber = (value) => {
+      const number = Number(value);
+      return Number.isFinite(number) ? number : 0;
+    };
+    const formatMoney = (value) => `Rs.${Math.round(asNumber(value))}`;
+    const now = new Date();
+    const today = [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, '0'),
+      String(now.getDate()).padStart(2, '0'),
+    ].join('-');
+    const asksForToday = hasAny('today', "today's", 'this day', 'daily');
+    const inRequestedPeriod = (record) => {
+      if (!asksForToday) return true;
+      const dateValue = String(record.date || record.created_at || '').slice(0, 10);
+      return dateValue === today;
+    };
+    const orders = allOrders.filter(inRequestedPeriod);
+    const expenses = allExpenses.filter(inRequestedPeriod);
+    const completedOrders = orders.filter((order) => String(order.status || '').toLowerCase() !== 'cancelled');
+    const availableItems = items.filter((item) => String(item.availability_status || 'available').toLowerCase() !== 'out_of_stock');
+    const outOfStockItems = items.filter((item) => String(item.availability_status || '').toLowerCase() === 'out_of_stock');
+    const itemReviews = (itemId) => liveReviews.filter((review) => review.menu_item_id === itemId);
+    const productMatch = [...items]
+      .sort((left, right) => String(right.name || '').length - String(left.name || '').length)
+      .find((item) => {
+        const name = normalizeVoiceText(item.name);
+        const words = name.split(/\s+/).filter((word) => word.length > 3);
+        return name && (query.includes(name) || words.some((word) => query.includes(word)));
+      });
+    const categoryMatch = liveCategories.find((category) => {
+      const name = normalizeVoiceText(category.name);
+      return name && query.includes(name);
+    });
+    const reply = (text) => ({ text, voice: text, lang: isTelugu ? 'te' : 'en' });
+    const requestedLabel = asksForToday ? 'today' : 'in the recorded data';
+
+    if (productMatch) {
+      const productReviews = itemReviews(productMatch.id);
+      const averageRating = productReviews.length
+        ? productReviews.reduce((sum, review) => sum + asNumber(review.rating), 0) / productReviews.length
+        : asNumber(productMatch.rating);
+      const availability = String(productMatch.availability_status || 'available').toLowerCase() === 'out_of_stock'
+        ? 'currently out of stock'
+        : 'available';
+      const ratingText = productReviews.length
+        ? ` It has a ${averageRating.toFixed(1)} out of 5 rating from ${productReviews.length} review${productReviews.length === 1 ? '' : 's'}.`
+        : '';
+      return reply(`${productMatch.name} is ${availability} at ${formatMoney(productMatch.price)} in ${productMatch.category}.${ratingText}`);
+    }
+
+    if (hasAny('revenue', 'sales', 'income', 'earning', 'profit', 'order total', 'how much made')) {
+      const revenue = completedOrders.reduce((sum, order) => sum + asNumber(order.total_amount ?? order.total ?? order.amount), 0);
+      const expenseTotal = expenses.reduce((sum, expense) => sum + asNumber(expense.amount), 0);
+      return reply(`${requestedLabel === 'today' ? 'Today' : 'The recorded'} sales are ${formatMoney(revenue)} from ${completedOrders.length} completed order${completedOrders.length === 1 ? '' : 's'}. Expenses are ${formatMoney(expenseTotal)}, so the recorded net is ${formatMoney(revenue - expenseTotal)}.`);
+    }
+
+    if (hasAny('expense', 'expenses', 'cost', 'spend', 'spent', 'spending', 'loss')) {
+      const total = expenses.reduce((sum, expense) => sum + asNumber(expense.amount), 0);
+      const largest = [...expenses].sort((left, right) => asNumber(right.amount) - asNumber(left.amount))[0];
+      const largestText = largest ? ` The largest entry is ${largest.category || largest.description || 'an uncategorized expense'} at ${formatMoney(largest.amount)}.` : '';
+      return reply(`Expenses ${requestedLabel} total ${formatMoney(total)} across ${expenses.length} entry${expenses.length === 1 ? '' : 'ies'}.${largestText}`);
+    }
+
+    if (hasAny('stock', 'inventory', 'ingredient', 'ingredients', 'restock', 'replenish', 'low stock', 'out of stock', 'availability')) {
+      const lowStock = liveInventory.filter((entry) => asNumber(entry.quantity) <= asNumber(entry.threshold));
+      const lowNames = lowStock.slice(0, 5).map((entry) => entry.item_name || entry.name || 'Unnamed item').join(', ');
+      const soldOutNames = outOfStockItems.slice(0, 5).map((item) => item.name).join(', ');
+      if (lowStock.length || soldOutNames) {
+        return reply(`${lowStock.length ? `Low inventory: ${lowNames}.` : ''}${lowStock.length && soldOutNames ? ' ' : ''}${soldOutNames ? `Menu items marked out of stock: ${soldOutNames}.` : ''}`);
+      }
+      return reply(`All ${liveInventory.length} tracked inventory item${liveInventory.length === 1 ? '' : 's'} are above their threshold, and ${availableItems.length} menu items are available.`);
+    }
+
+    if (hasAny('popular', 'best seller', 'best-selling', 'most viewed', 'trending', 'demand', 'top item', 'top product', 'most clicked', 'search query', 'searched')) {
+      const viewCounts = {};
+      const searchCounts = {};
+      logs.forEach((log) => {
+        if (log.activity_type === 'view' && log.target_id) viewCounts[log.target_id] = (viewCounts[log.target_id] || 0) + 1;
+        if (log.activity_type === 'search' && String(log.search_query || '').trim()) {
+          const term = String(log.search_query).trim().toLowerCase();
+          searchCounts[term] = (searchCounts[term] || 0) + 1;
+        }
+      });
+      const itemById = Object.fromEntries(items.map((item) => [item.id, item]));
+      const topViews = Object.entries(viewCounts)
+        .sort(([, left], [, right]) => right - left)
+        .slice(0, 3)
+        .flatMap(([id, views]) => itemById[id] ? [`${itemById[id].name} (${views} views)`] : []);
+      const topSearches = Object.entries(searchCounts)
+        .sort(([, left], [, right]) => right - left)
+        .slice(0, 3)
+        .map(([term, count]) => `${term} (${count} searches)`);
+      if (hasAny('search query', 'searched') && topSearches.length) return reply(`The most common customer searches are ${topSearches.join(', ')}.`);
+      if (topViews.length) return reply(`The most viewed menu items are ${topViews.join(', ')}.${topSearches.length ? ` Top searches: ${topSearches.join(', ')}.` : ''}`);
+      return reply('There is no customer view or search activity in the database yet. Popular-item insights will appear as customers browse the menu.');
+    }
+
+    if (hasAny('review', 'reviews', 'rating', 'ratings', 'feedback', 'sentiment', 'complaint')) {
+      const average = liveReviews.length
+        ? liveReviews.reduce((sum, review) => sum + asNumber(review.rating), 0) / liveReviews.length
+        : 0;
+      const positive = liveReviews.filter((review) => asNumber(review.rating) >= 4).length;
+      const low = liveReviews.filter((review) => asNumber(review.rating) <= 2).length;
+      if (!liveReviews.length) return reply('There are no customer reviews in the database yet.');
+      return reply(`Customer feedback averages ${average.toFixed(1)} out of 5 from ${liveReviews.length} review${liveReviews.length === 1 ? '' : 's'}: ${positive} positive and ${low} low-rated.`);
+    }
+
+    if (hasAny('customer', 'customers', 'user', 'users', 'online', 'login', 'logged in')) {
+      const customers = liveUsers.filter((user) => String(user.role || '').toLowerCase() !== 'admin');
+      const cutoff = Date.now() - (2 * 60 * 1000);
+      const onlineIds = new Set(logs
+        .filter((log) => log.user_id && new Date(log.created_at).getTime() >= cutoff)
+        .map((log) => log.user_id));
+      return reply(`There are ${customers.length} customer account${customers.length === 1 ? '' : 's'} in the database, with ${onlineIds.size} active in the last two minutes.`);
+    }
+
+    if (hasAny('offer', 'offers', 'deal', 'discount', 'special', 'promotion')) {
+      const offer = liveOffers?.[new Date().getDay()];
+      if (offer?.isActive && offer.title) return reply(`Today's active offer is ${offer.title}.${offer.subtitle ? ` ${offer.subtitle}` : ''}`);
+      return reply('There is no active offer configured for today.');
+    }
+
+    if (hasAny('menu', 'product', 'products', 'item', 'items', 'price', 'prices', 'category', 'categories') || categoryMatch) {
+      const categoryItems = categoryMatch ? items.filter((item) => item.category === categoryMatch.name) : availableItems;
+      const samples = categoryItems.slice(0, 5).map((item) => `${item.name} ${formatMoney(item.price)}`).join(', ');
+      const categoryText = categoryMatch ? `${categoryMatch.name} has ${categoryItems.length} item${categoryItems.length === 1 ? '' : 's'}` : `The menu has ${items.length} items across ${liveCategories.length} categories`;
+      return reply(`${categoryText}. ${samples ? `Available examples: ${samples}.` : 'No matching menu items are currently recorded.'}`);
+    }
+
+    const revenue = completedOrders.reduce((sum, order) => sum + asNumber(order.total_amount ?? order.total ?? order.amount), 0);
+    const activeOffer = liveOffers?.[new Date().getDay()];
+    return reply(`Live database summary: ${items.length} menu items, ${availableItems.length} available, ${completedOrders.length} completed order${completedOrders.length === 1 ? '' : 's'}, ${formatMoney(revenue)} sales ${requestedLabel}, ${liveReviews.length} review${liveReviews.length === 1 ? '' : 's'}, and ${liveUsers.filter((user) => String(user.role || '').toLowerCase() !== 'admin').length} customer accounts.${activeOffer?.isActive ? ` Today's offer is ${activeOffer.title}.` : ''} Ask about a menu item, stock, sales, expenses, customers, reviews, searches, or offers.`);
+  };
+
   const buildDeployedVoiceResponse = (queryText, lang = 'en') => {
     const query = normalizeVoiceText(queryText);
     const isTelugu = lang === 'te' || /[\u0C00-\u0C7F]/.test(queryText || '');
@@ -1447,15 +1641,18 @@ export default function OwnerDashboard({
       const effectiveLang = queryLang || voiceLang || 'en';
       let data;
       if (HAS_BACKEND_API) {
-        const res = await fetchAdmin(`${API_BASE}/api/ai/voice?speech_text=${encodeURIComponent(cleanQuery)}&lang=${encodeURIComponent(effectiveLang)}`);
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.detail || `Server error ${res.status}`);
+        try {
+          const res = await fetchAdmin(`${API_BASE}/api/ai/voice?speech_text=${encodeURIComponent(cleanQuery)}&lang=${encodeURIComponent(effectiveLang)}`);
+          if (res.ok) {
+            data = await res.json();
+          } else {
+            console.warn(`Voice API unavailable (${res.status}); using live database fallback.`);
+          }
+        } catch (error) {
+          console.warn('Voice API request failed; using live database fallback.', error);
         }
-        data = await res.json();
-      } else {
-        data = buildDeployedVoiceResponse(cleanQuery, effectiveLang);
       }
+      if (!data) data = await buildLiveDatabaseVoiceResponse(cleanQuery, effectiveLang);
       const replyText = data.text || data.reply || 'No response from AI.';
       const spokenReply = data.voice || replyText;
       const botMessage = { role: 'bot', text: replyText, timestamp: new Date().toLocaleTimeString() };
