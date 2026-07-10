@@ -811,8 +811,23 @@ export default function OwnerDashboard({
         recognition.onresult = (event) => {
           if (!isCurrentRecognition()) return;
           const result = event.results[event.resultIndex] || event.results[0];
+          if (!result?.isFinal) return;
           const text = result?.[0]?.transcript?.trim();
           if (!text) return;
+          const heardText = normalizeVoiceText(text);
+          const heardAssistantEcho =
+            window._lastSpokenText &&
+            Date.now() - (window._lastSpokenAt || 0) < 9000 &&
+            isLikelyAssistantEcho(heardText, window._lastSpokenText);
+          if (heardAssistantEcho) {
+            console.log('ASR: Ignoring assistant speech captured by the microphone');
+            window._asrRecognition = null;
+            setVoiceQuery('');
+            setIsListening(false);
+            try { recognition.abort(); } catch(e){}
+            resumeListeningAfterAI(1200);
+            return;
+          }
           console.log('ASR SpeechRecognition transcribed:', text);
           setVoiceQuery(text);
           window._aiSpeaking = true;
@@ -860,6 +875,14 @@ export default function OwnerDashboard({
       } catch (recognitionErr) {
         console.warn('ASR: SpeechRecognition failed, falling back to MediaRecorder:', recognitionErr);
       }
+    }
+
+    if (!HAS_BACKEND_API) {
+      window._voiceActive = false;
+      window._voiceProcessing = false;
+      setIsListening(false);
+      setVoiceError('Voice input is not available in this browser. Open the site in the latest Google Chrome and allow microphone access.');
+      return;
     }
 
     // Fallback to local Whisper recording + API
@@ -1142,7 +1165,7 @@ export default function OwnerDashboard({
   };
 
   // Resume ASR mic after AI finishes speaking
-  const resumeListeningAfterAI = (delayMs = 400) => {
+  const resumeListeningAfterAI = (delayMs = 1100) => {
     if (typeof window === 'undefined' || !window._voiceActive) return;
     if (window._voiceResumeTimer) clearTimeout(window._voiceResumeTimer);
     window._voiceResumeTimer = setTimeout(() => {
@@ -1281,6 +1304,17 @@ export default function OwnerDashboard({
   const normalizeVoiceText = (text) =>
     String(text || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
+  const isLikelyAssistantEcho = (heardText, spokenText) => {
+    if (!heardText || !spokenText || heardText.length < 12) return false;
+    if (spokenText.includes(heardText) || heardText.includes(spokenText)) return true;
+
+    const heardTokens = heardText.split(/[^a-z0-9]+/).filter(token => token.length > 2);
+    const spokenTokens = new Set(spokenText.split(/[^a-z0-9]+/).filter(token => token.length > 2));
+    if (heardTokens.length < 4) return false;
+    const overlap = heardTokens.filter(token => spokenTokens.has(token)).length;
+    return overlap / heardTokens.length >= 0.75;
+  };
+
   const buildDeployedVoiceResponse = (queryText, lang = 'en') => {
     const query = normalizeVoiceText(queryText);
     const isTelugu = lang === 'te' || /[\u0C00-\u0C7F]/.test(queryText || '');
@@ -1342,6 +1376,16 @@ export default function OwnerDashboard({
     const cleanQuery = queryText.trim();
     const normalizedQuery = normalizeVoiceText(cleanQuery);
     const now = Date.now();
+    if (
+      typeof window !== 'undefined' &&
+      window._lastSpokenText &&
+      now - (window._lastSpokenAt || 0) < 9000 &&
+      isLikelyAssistantEcho(normalizedQuery, window._lastSpokenText)
+    ) {
+      setVoiceQuery('');
+      resumeListeningAfterAI(1200);
+      return;
+    }
     if (
       typeof window !== 'undefined' &&
       window._lastSubmittedText === normalizedQuery &&
@@ -1413,6 +1457,8 @@ export default function OwnerDashboard({
       setVoiceReply(replyText);
       if (typeof window !== 'undefined') {
         window._aiSpeaking = true;
+        window._lastSpokenText = normalizeVoiceText(spokenReply);
+        window._lastSpokenAt = Date.now();
       }
 
       // Speak the response aloud
@@ -4009,9 +4055,6 @@ export default function OwnerDashboard({
                           console.warn('ASR: manual stop failed, stopping session:', e);
                           stopListening();
                         }
-                      } else if (isListening || window._voiceActive) {
-                        // Stop and cancel
-                        stopListening();
                       } else if (isSpeaking) {
                         if (typeof window !== 'undefined') {
                           if (window.currentIndicTtsAudio) {
@@ -4021,12 +4064,18 @@ export default function OwnerDashboard({
                             } catch (e) {}
                             window.currentIndicTtsAudio = null;
                           }
+                          window.currentUtterance = null;
                           if (window.speechSynthesis) {
                             window.speechSynthesis.cancel();
                           }
+                          window._aiSpeaking = false;
+                          window._voiceProcessing = false;
                         }
                         setIsSpeaking(false);
-                        resumeListeningAfterAI(100);
+                        startListening();
+                      } else if (isListening || window._voiceActive) {
+                        // Stop and cancel
+                        stopListening();
                       } else {
                         startListening();
                       }
