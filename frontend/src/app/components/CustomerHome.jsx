@@ -4,9 +4,9 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { getImageForItem } from '../utils/imageMapper';
 import { useBreakpoint, useScreenProfile } from '../utils/responsive';
 
-const API_BASE = typeof window !== 'undefined' 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' 
   ? `http://${window.location.hostname}:8000` 
-  : 'http://127.0.0.1:8000';
+  : 'http://127.0.0.1:8000');
 
 
 // ─── Constants ───────────────────────────────────────────────────────────────
