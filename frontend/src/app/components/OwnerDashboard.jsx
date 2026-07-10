@@ -765,14 +765,24 @@ export default function OwnerDashboard({
     if (typeof window === 'undefined') return;
 
     // Always cleanup previous session before starting fresh
+    if (window._voiceResumeTimer) {
+      clearTimeout(window._voiceResumeTimer);
+      window._voiceResumeTimer = null;
+    }
+    window._voiceRecognitionGeneration = (window._voiceRecognitionGeneration || 0) + 1;
     stopBargeInMonitor();
     if (window._asrVadLoop)  { clearInterval(window._asrVadLoop); window._asrVadLoop = null; }
     if (window._asrStream)   { window._asrStream.getTracks().forEach(t => t.stop()); window._asrStream = null; }
     if (window._asrAudioCtx) { try { window._asrAudioCtx.close(); } catch(e){} window._asrAudioCtx = null; }
     if (window._asrRecognition) { try { window._asrRecognition.abort(); } catch(e){} window._asrRecognition = null; }
-    if (window.speechSynthesis) { window.speechSynthesis.cancel(); setIsSpeaking(false); }
+    if (window.speechSynthesis) {
+      window.currentUtterance = null;
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+    }
 
     window._aiSpeaking = false;
+    window._voiceProcessing = false;
     window._voiceActive = true;
     window._lastSubmittedText = '';
     window._lastSubmitTime = 0;
@@ -783,36 +793,52 @@ export default function OwnerDashboard({
       console.log('ASR: Using browser-native SpeechRecognition');
       try {
         const recognition = new SpeechRecognition();
+        const recognitionGeneration = window._voiceRecognitionGeneration;
+        const isCurrentRecognition = () =>
+          window._asrRecognition === recognition &&
+          window._voiceRecognitionGeneration === recognitionGeneration;
         recognition.lang = voiceLang === 'te' ? 'te-IN' : (voiceLang === 'hi' ? 'hi-IN' : 'en-US');
         recognition.continuous = false;
         recognition.interimResults = false;
 
         recognition.onstart = () => {
+          if (!isCurrentRecognition()) return;
           setIsListening(true);
           setVoiceError('');
           setVoiceQuery('🎙️ Listening...');
         };
 
         recognition.onresult = (event) => {
-          const text = event.results[0][0].transcript;
+          if (!isCurrentRecognition()) return;
+          const result = event.results[event.resultIndex] || event.results[0];
+          const text = result?.[0]?.transcript?.trim();
+          if (!text) return;
           console.log('ASR SpeechRecognition transcribed:', text);
           setVoiceQuery(text);
           window._aiSpeaking = true;
+          window._voiceProcessing = true;
           setIsListening(false);
+          window._asrRecognition = null;
           try { recognition.abort(); } catch(e){}
           handleVoiceQuerySubmit(text, voiceLang);
         };
 
         recognition.onerror = (event) => {
+          if (!isCurrentRecognition()) return;
           if (event.error === 'no-speech') {
-            console.log('ASR: No speech detected. Restarting...');
+            console.log('ASR: No speech detected. Listening again...');
+            window._asrRecognition = null;
+            setIsListening(false);
             if (window._voiceActive && !window._aiSpeaking) {
-              try { recognition.start(); } catch(e){}
+              resumeListeningAfterAI(250);
             }
           } else if (event.error === 'aborted') {
             setIsListening(false);
           } else {
             console.error('ASR SpeechRecognition error:', event.error);
+            window._asrRecognition = null;
+            window._voiceActive = false;
+            window._voiceProcessing = false;
             setVoiceError('Speech recognition failed: ' + event.error);
             setIsListening(false);
           }
@@ -820,8 +846,11 @@ export default function OwnerDashboard({
 
         recognition.onend = () => {
           console.log('ASR SpeechRecognition ended');
-          if (window._voiceActive && !window._aiSpeaking && !isListening) {
-            try { recognition.start(); } catch(e){}
+          if (!isCurrentRecognition()) return;
+          window._asrRecognition = null;
+          setIsListening(false);
+          if (window._voiceActive && !window._aiSpeaking && !window._voiceProcessing) {
+            resumeListeningAfterAI(250);
           }
         };
 
@@ -1114,12 +1143,16 @@ export default function OwnerDashboard({
 
   // Resume ASR mic after AI finishes speaking
   const resumeListeningAfterAI = (delayMs = 400) => {
-    setTimeout(() => {
+    if (typeof window === 'undefined' || !window._voiceActive) return;
+    if (window._voiceResumeTimer) clearTimeout(window._voiceResumeTimer);
+    window._voiceResumeTimer = setTimeout(() => {
+      window._voiceResumeTimer = null;
       stopBargeInMonitor();
+      if (!window._voiceActive) return;
       window._aiSpeaking = false;
-      if (window._voiceActive) {
-        startListening();
-      }
+      window._voiceProcessing = false;
+      setIsSpeaking(false);
+      startListening();
     }, delayMs);
   };
 
@@ -1127,6 +1160,12 @@ export default function OwnerDashboard({
   const stopListening = () => {
     window._voiceActive = false;
     window._aiSpeaking  = false;
+    window._voiceProcessing = false;
+    window._voiceRecognitionGeneration = (window._voiceRecognitionGeneration || 0) + 1;
+    if (window._voiceResumeTimer) {
+      clearTimeout(window._voiceResumeTimer);
+      window._voiceResumeTimer = null;
+    }
     stopBargeInMonitor();
     window._asrStartSession = null;
     window._asrAnalyser = null;
@@ -1145,6 +1184,7 @@ export default function OwnerDashboard({
       } catch(e){}
       window.currentIndicTtsAudio = null;
     }
+    window.currentUtterance = null;
     if (window.speechSynthesis) window.speechSynthesis.cancel();
     setIsSpeaking(false);
     setIsListening(false);
@@ -1323,15 +1363,34 @@ export default function OwnerDashboard({
     setVoiceError('');
     setIsAnalyzing(true);
 
-    // Safety valve — if speechSynthesis never fires onend, unblock mic after 15s
+    // Keep one recovery path for every TTS outcome. Browser speech can occasionally
+    // miss onend, so the session must not remain locked after the first answer.
     let safetyTimer = null;
+    let recoveryChecks = 0;
+    const finishVoiceTurn = (delayMs = 400) => {
+      if (safetyTimer) {
+        clearTimeout(safetyTimer);
+        safetyTimer = null;
+      }
+      stopBargeInMonitor();
+      setIsSpeaking(false);
+      resumeListeningAfterAI(delayMs);
+    };
     const forceResume = () => {
-      if (typeof window !== 'undefined' && window.speechSynthesis?.speaking) {
+      if (
+        typeof window !== 'undefined' &&
+        window.speechSynthesis?.speaking &&
+        recoveryChecks < 1
+      ) {
+        recoveryChecks += 1;
         safetyTimer = setTimeout(forceResume, 3000);
         return;
       }
-      setIsSpeaking(false);
-      resumeListeningAfterAI();
+      if (typeof window !== 'undefined' && window.speechSynthesis?.speaking) {
+        window.currentUtterance = null;
+        window.speechSynthesis.cancel();
+      }
+      finishVoiceTurn();
     };
 
     try {
@@ -1373,26 +1432,21 @@ export default function OwnerDashboard({
           window.currentIndicTtsAudio = audio;
           safetyTimer = setTimeout(forceResume, Math.min(45000, Math.max(15000, String(spokenReply).length * 90)));
 
-          audio.onended = () => {
+          const finishIndicSpeech = () => {
+            if (window.currentIndicTtsAudio !== audio) return;
+            window.currentIndicTtsAudio = null;
             URL.revokeObjectURL(audioUrl);
-            stopBargeInMonitor();
-            if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = null; }
-            setIsSpeaking(false);
-            resumeListeningAfterAI();
+            finishVoiceTurn();
           };
-          audio.onerror = () => {
-            URL.revokeObjectURL(audioUrl);
-            stopBargeInMonitor();
-            if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = null; }
-            setIsSpeaking(false);
-            resumeListeningAfterAI();
-          };
+          audio.onended = finishIndicSpeech;
+          audio.onerror = finishIndicSpeech;
 
           startBargeInMonitor();
           await audio.play();
           return;
         } catch (ttsErr) {
           console.warn('Indic TTS playback failed, falling back to browser speech:', ttsErr);
+          window.currentIndicTtsAudio = null;
           stopBargeInMonitor();
           if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = null; }
           setIsSpeaking(false);
@@ -1400,6 +1454,7 @@ export default function OwnerDashboard({
       }
 
       if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.currentUtterance = null;
         window.speechSynthesis.cancel();
         
         // Chrome bug workaround: resume if paused
@@ -1434,21 +1489,20 @@ export default function OwnerDashboard({
         safetyTimer = setTimeout(forceResume, speechSafetyMs);
 
         utterance.onstart = () => {
+          if (window.currentUtterance !== utterance) return;
           setIsSpeaking(true);
           startBargeInMonitor();
         };
         utterance.onend = () => {
-          stopBargeInMonitor();
-          if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = null; }
-          setIsSpeaking(false);
-          resumeListeningAfterAI();
+          if (window.currentUtterance !== utterance) return;
+          window.currentUtterance = null;
+          finishVoiceTurn();
         };
         utterance.onerror = (speechErr) => {
+          if (window.currentUtterance !== utterance) return;
           console.warn('ASR SpeechSynthesis error:', speechErr);
-          stopBargeInMonitor();
-          if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = null; }
-          setIsSpeaking(false);
-          resumeListeningAfterAI();
+          window.currentUtterance = null;
+          finishVoiceTurn();
         };
 
         window.currentUtterance = utterance;
@@ -1464,9 +1518,8 @@ export default function OwnerDashboard({
       setVoiceError(errorMsg);
       setVoiceHistory(prev => [...prev, { role: 'bot', text: `⚠️ ${errorMsg}`, timestamp: new Date().toLocaleTimeString() }]);
       // CRITICAL: always unblock mic on error so user can speak again
-      resumeListeningAfterAI(500);
+      finishVoiceTurn(500);
     } finally {
-      if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = null; }
       setIsAnalyzing(false);
     }
   };
