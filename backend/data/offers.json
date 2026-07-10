@@ -1,0 +1,44 @@
+{
+  "Monday": {
+    "title": "Buy 3 Get 1 Free",
+    "description": "On all Milkshakes!",
+    "image_url": "/banner_monday.png",
+    "is_active": true
+  },
+  "Tuesday": {
+    "title": "Buy 1 Get 1 Free",
+    "description": "Buy any hot tea, get one crispy biscuit free!",
+    "image_url": "/banner_tuesday.png",
+    "is_active": true
+  },
+  "Wednesday": {
+    "title": "Campa Cola Drink Free",
+    "description": "Get 1 free Campa Cola drink on all non-veg snack orders above ₹200!",
+    "image_url": "/banner_wednesday.png",
+    "is_active": true
+  },
+  "Thursday": {
+    "title": "Buy 3 Scoops Get 1 Free",
+    "description": "On all premium ice cream flavors!",
+    "image_url": "/banner_thursday.png",
+    "is_active": true
+  },
+  "Friday": {
+    "title": "Flat 10% Off",
+    "description": "On all delicious thick milkshakes!",
+    "image_url": "/banner_friday.png",
+    "is_active": true
+  },
+  "Saturday": {
+    "title": "Campa Cola Drink Free",
+    "description": "Get 1 free Campa Cola drink on all veg snack orders above ₹200!",
+    "image_url": "/banner_saturday.png",
+    "is_active": true
+  },
+  "Sunday": {
+    "title": "Sunday Special",
+    "description": "No active offers today. Relax and enjoy our full menu!",
+    "image_url": "",
+    "is_active": false
+  }
+}
