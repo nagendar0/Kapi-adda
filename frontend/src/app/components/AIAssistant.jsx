@@ -8,6 +8,26 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefine
   ? `http://${window.location.hostname}:8000`
   : 'http://127.0.0.1:8000');
 const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname));
+const SUPABASE_URL = 'https://kvjvnrktnkenlsaatmxq.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2anZucmt0bmtlbmxzYWF0bXhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo';
+
+const recordDeployedSearch = (userId, searchQuery) => {
+  if (!userId || HAS_BACKEND_API) return;
+
+  fetch(`${SUPABASE_URL}/rest/v1/user_activity_logs`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      user_id: userId,
+      activity_type: 'search',
+      search_query: searchQuery,
+    }),
+  }).catch(() => {});
+};
 
 
 // Quick replies managed dynamically by active mode
@@ -820,6 +840,7 @@ export default function AIAssistant({
     setIsTyping(true);
 
     if (!HAS_BACKEND_API) {
+      recordDeployedSearch(user?.id, cleanedText);
       const localReply = buildLocalAssistantReply({
         query: cleanedText,
         menuItems,

@@ -517,8 +517,7 @@ export default function OwnerDashboard({
     const topCategory = Object.entries(categoryCounts).sort(([, left], [, right]) => right - left)[0];
     if (topCategory) demandAlerts.push(`Category trend: ${topCategory[0]} has the strongest customer interest with ${topCategory[1]} views.`);
     if (!demandAlerts.length) {
-      demandAlerts.push('System ready: customer activity will appear here as visitors browse and search the menu.');
-      demandAlerts.push(`Catalog insight: ${menuItems?.length || 0} menu items are available for analysis.`);
+      demandAlerts.push('No customer activity has been recorded yet. Analytics will appear as customers browse, search, and place orders.');
     }
 
     const sentimentCounts = (reviews || []).reduce((counts, review) => {
@@ -656,12 +655,12 @@ export default function OwnerDashboard({
     else if (activeTab === 'users') fetchAdminUsers();
   }, [activeTab]);
 
-  // Auto-refresh users list every 3 seconds — near real-time online/offline detection
+  // Refresh customer records only while this tab is open to keep the dashboard responsive.
   useEffect(() => {
     if (activeTab !== 'users') return undefined;
     const interval = setInterval(() => {
       fetchAdminUsers(true); // silent refresh - no loading spinner
-    }, 10000);
+    }, 5000);
     return () => clearInterval(interval);
   }, [activeTab]);
 
@@ -3130,7 +3129,7 @@ export default function OwnerDashboard({
                           Live · Auto-refresh
                         </span>
                       </div>
-                      <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: COLORS.textSecondary }}>{adminUsers.length} registered customers · live updates every 3s</p>
+                      <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: COLORS.textSecondary }}>{adminUsers.length} registered customers · live updates every 5s</p>
                     </div>
                     <button
                       onClick={() => fetchAdminUsers(false)}
