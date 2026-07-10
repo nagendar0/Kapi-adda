@@ -9,6 +9,8 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefine
   ? `http://${window.location.hostname}:8000`
   : 'http://127.0.0.1:8000');
 
+const SUPABASE_URL = "https://kvjvnrktnkenlsaatmxq.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2anZucmt0bmtlbmxzYWF0bXhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo";
 
 const COLORS = {
   bg: '#0a0702',
@@ -277,6 +279,86 @@ export default function OwnerDashboard({
     });
   };
 
+  const fetchSupabaseTable = async (table, query = 'select=*') => {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+    });
+    if (!res.ok) {
+      throw new Error(`Supabase ${table} fetch failed: ${res.status}`);
+    }
+    return res.json();
+  };
+
+  const extractPiecesFromDesc = (description = '') => {
+    const match = String(description).match(/\s*\[Pieces:\s*(.*?)\]\s*$/);
+    if (!match) return { description, pieces: undefined };
+    return {
+      description: String(description).slice(0, match.index).trim(),
+      pieces: match[1],
+    };
+  };
+
+  const normalizeMenuItem = (item, reviewsMap = {}) => {
+    const piecesInfo = extractPiecesFromDesc(item.description || '');
+    const ratings = reviewsMap[item.id] || [];
+    const avgRating = ratings.length
+      ? ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length
+      : item.rating;
+    return {
+      ...item,
+      description: piecesInfo.description,
+      pieces: item.pieces || piecesInfo.pieces,
+      rating: avgRating || item.rating || 4.5,
+    };
+  };
+
+  const loadMenuGroups = (groups, cats = []) => {
+    setMenu(groups);
+    setCategories(cats);
+    const flatItems = groups.flatMap(catGroup =>
+      (catGroup.items || []).map(item => ({
+        ...item,
+        category: catGroup.category,
+      }))
+    );
+    setFlatMenu(flatItems);
+
+    if (cats.length > 0 && !menuForm.category_id) {
+      setMenuForm(prev => ({ ...prev, category_id: cats[0].id }));
+    }
+  };
+
+  const fetchMenuFromSupabase = async () => {
+    const [cats, items, reviews] = await Promise.all([
+      fetchSupabaseTable('categories', 'select=*'),
+      fetchSupabaseTable('menu_items', 'select=*'),
+      fetchSupabaseTable('reviews', 'select=menu_item_id,rating'),
+    ]);
+
+    const reviewsMap = {};
+    (reviews || []).forEach((review) => {
+      const itemId = review.menu_item_id;
+      const rating = Number(review.rating);
+      if (!itemId || Number.isNaN(rating)) return;
+      if (!reviewsMap[itemId]) reviewsMap[itemId] = [];
+      reviewsMap[itemId].push(rating);
+    });
+
+    const groups = (cats || []).map((cat) => ({
+      id: cat.id,
+      category: cat.name,
+      description: cat.description,
+      items: (items || [])
+        .filter(item => item.category_id === cat.id)
+        .map(item => normalizeMenuItem(item, reviewsMap)),
+    }));
+
+    loadMenuGroups(groups, cats || []);
+  };
+
   // Fetch functions
   const fetchDashboard = async () => {
     try {
@@ -304,27 +386,23 @@ export default function OwnerDashboard({
       let cats = [];
       if (catRes.ok) {
         cats = await catRes.json();
-        setCategories(cats);
       }
 
       if (res.ok) {
         const data = await res.json();
-        setMenu(data);
-        
-        const flatItems = data.flatMap(catGroup => 
-          (catGroup.items || []).map(item => ({
-            ...item,
-            category: catGroup.category
-          }))
-        );
-        setFlatMenu(flatItems);
-
-        if (cats.length > 0 && !menuForm.category_id) {
-          setMenuForm(prev => ({ ...prev, category_id: cats[0].id }));
-        }
+        loadMenuGroups(data, cats);
+        return;
       }
+      throw new Error(`Admin menu API failed: ${res.status}`);
     } catch (err) {
       console.warn('Admin menu API unavailable:', err);
+      try {
+        await fetchMenuFromSupabase();
+      } catch (fallbackErr) {
+        console.warn('Supabase menu fallback unavailable:', fallbackErr);
+        setMenu([]);
+        setFlatMenu([]);
+      }
     } finally {
       setLoadingMenu(false);
     }
@@ -337,9 +415,18 @@ export default function OwnerDashboard({
       if (res.ok) {
         const data = await res.json();
         setInventory(data);
+        return;
       }
+      throw new Error(`Inventory API failed: ${res.status}`);
     } catch (err) {
       console.warn('Inventory API unavailable:', err);
+      try {
+        const data = await fetchSupabaseTable('inventory', 'select=*');
+        setInventory(data || []);
+      } catch (fallbackErr) {
+        console.warn('Supabase inventory fallback unavailable:', fallbackErr);
+        setInventory([]);
+      }
     } finally {
       setLoadingInventory(false);
     }
@@ -352,9 +439,18 @@ export default function OwnerDashboard({
       if (res.ok) {
         const data = await res.json();
         setExpenses(data);
+        return;
       }
+      throw new Error(`Expenses API failed: ${res.status}`);
     } catch (err) {
       console.warn('Expenses API unavailable:', err);
+      try {
+        const data = await fetchSupabaseTable('expenses', 'select=*');
+        setExpenses(data || []);
+      } catch (fallbackErr) {
+        console.warn('Supabase expenses fallback unavailable:', fallbackErr);
+        setExpenses([]);
+      }
     } finally {
       setLoadingExpenses(false);
     }
@@ -2140,6 +2236,24 @@ export default function OwnerDashboard({
                   onFocus={(e) => e.currentTarget.style.borderColor = COLORS.amber}
                   onBlur={(e) => e.currentTarget.style.borderColor = COLORS.cardBorder}
                 />
+              </div>
+            )}
+
+            {!loadingMenu && flatMenu.length === 0 && (
+              <div style={{
+                padding: '32px',
+                background: COLORS.cardBg,
+                border: `1px solid ${COLORS.cardBorder}`,
+                borderRadius: '16px',
+                color: COLORS.textSecondary,
+                textAlign: 'center',
+              }}>
+                <div style={{ fontSize: '18px', fontWeight: '800', color: COLORS.textPrimary, marginBottom: '8px' }}>
+                  No menu data loaded
+                </div>
+                <div style={{ fontSize: '13px', lineHeight: 1.6 }}>
+                  The dashboard could not reach the live backend. It will try the Supabase fallback automatically when data is available there.
+                </div>
               </div>
             )}
 
