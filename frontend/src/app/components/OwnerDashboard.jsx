@@ -841,12 +841,13 @@ export default function OwnerDashboard({
         recognition.onerror = (event) => {
           if (!isCurrentRecognition()) return;
           if (event.error === 'no-speech') {
-            console.log('ASR: No speech detected. Listening again...');
+            console.log('ASR: No speech detected. Returning to standby.');
             window._asrRecognition = null;
+            window._voiceActive = false;
+            window._voiceProcessing = false;
             setIsListening(false);
-            if (window._voiceActive && !window._aiSpeaking) {
-              resumeListeningAfterAI(250);
-            }
+            setVoiceQuery('');
+            setVoiceError('No speech detected. Tap the microphone and try again.');
           } else if (event.error === 'aborted') {
             setIsListening(false);
           } else {
@@ -865,7 +866,8 @@ export default function OwnerDashboard({
           window._asrRecognition = null;
           setIsListening(false);
           if (window._voiceActive && !window._aiSpeaking && !window._voiceProcessing) {
-            resumeListeningAfterAI(250);
+            window._voiceActive = false;
+            setVoiceQuery('');
           }
         };
 
@@ -1164,7 +1166,8 @@ export default function OwnerDashboard({
     }
   };
 
-  // Resume ASR mic after AI finishes speaking
+  // Return the control to standby after each completed voice turn. Leaving the
+  // microphone open here can capture the assistant's own speaker output.
   const resumeListeningAfterAI = (delayMs = 1100) => {
     if (typeof window === 'undefined' || !window._voiceActive) return;
     if (window._voiceResumeTimer) clearTimeout(window._voiceResumeTimer);
@@ -1174,8 +1177,11 @@ export default function OwnerDashboard({
       if (!window._voiceActive) return;
       window._aiSpeaking = false;
       window._voiceProcessing = false;
+      window._voiceActive = false;
+      window._asrRecognition = null;
       setIsSpeaking(false);
-      startListening();
+      setIsListening(false);
+      setVoiceQuery('');
     }, delayMs);
   };
 
@@ -1487,7 +1493,6 @@ export default function OwnerDashboard({
           audio.onended = finishIndicSpeech;
           audio.onerror = finishIndicSpeech;
 
-          startBargeInMonitor();
           await audio.play();
           return;
         } catch (ttsErr) {
@@ -1537,7 +1542,6 @@ export default function OwnerDashboard({
         utterance.onstart = () => {
           if (window.currentUtterance !== utterance) return;
           setIsSpeaking(true);
-          startBargeInMonitor();
         };
         utterance.onend = () => {
           if (window.currentUtterance !== utterance) return;
