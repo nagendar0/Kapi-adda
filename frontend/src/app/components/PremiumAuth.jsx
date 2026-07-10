@@ -568,16 +568,21 @@ export default function PremiumAuth({
   }, []);
 
   // Sync initialView prop changes
+  const lastInitialViewRef = useRef(initialView);
   useEffect(() => {
-    let nextView = null;
-    if (initialView === 'login' || initialView === 'signup-step1' || initialView === 'signup-step2') {
-      nextView = initialView;
-    } else if (initialView === 'signup') {
-      nextView = 'signup-step1';
+    if (lastInitialViewRef.current !== initialView) {
+      lastInitialViewRef.current = initialView;
+      let nextView = null;
+      if (initialView === 'login' || initialView === 'signup-step1' || initialView === 'signup-step2') {
+        nextView = initialView;
+      } else if (initialView === 'signup') {
+        nextView = 'signup-step1';
+      }
+      if (nextView && nextView !== view) {
+        const timer = setTimeout(() => transitionTo(nextView), 0);
+        return () => clearTimeout(timer);
+      }
     }
-    if (!nextView || nextView === view) return;
-    const timer = setTimeout(() => transitionTo(nextView), 0);
-    return () => clearTimeout(timer);
   }, [initialView, transitionTo, view]);
 
   // ── Login submission ────────────────────────────────────────────────────────
