@@ -517,6 +517,7 @@ export default function PremiumAuth({
   onSignupSuccess,
   onBackToHome,
   initialView = 'login',
+  onViewChange,
 }) {
   const breakpoint = useBreakpoint();
   const screen = useScreenProfile(breakpoint);
@@ -534,14 +535,14 @@ export default function PremiumAuth({
   const [loginError, setLoginError] = useState('');
   const [loginFieldErrors, setLoginFieldErrors] = useState({});
 
-  // Signup step 1
+  // Signup state
   const [signupName, setSignupName] = useState('');
   const [signupEmail, setSignupEmail] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
   const [signupConfirm, setSignupConfirm] = useState('');
   const [signupFieldErrors, setSignupFieldErrors] = useState({});
 
-  // Signup step 2 — taste prefs
+  // Taste preferences
   const [selectedBrews, setSelectedBrews] = useState([]);
   const [selectedMilk, setSelectedMilk] = useState('');
   const [selectedStrength, setSelectedStrength] = useState('');
@@ -564,8 +565,15 @@ export default function PremiumAuth({
     setTimeout(() => {
       setView(nextView);
       setIsVisible(true);
+      if (onViewChange) {
+        if (nextView === 'login') {
+          onViewChange('login');
+        } else if (nextView === 'signup-step1' || nextView === 'signup-step2') {
+          onViewChange('onboarding');
+        }
+      }
     }, 280);
-  }, []);
+  }, [onViewChange]);
 
   // Sync initialView prop changes
   const lastInitialViewRef = useRef(initialView);
@@ -575,7 +583,7 @@ export default function PremiumAuth({
       let nextView = null;
       if (initialView === 'login' || initialView === 'signup-step1' || initialView === 'signup-step2') {
         nextView = initialView;
-      } else if (initialView === 'signup') {
+      } else if (initialView === 'signup' || initialView === 'onboarding') {
         nextView = 'signup-step1';
       }
       if (nextView && nextView !== view) {

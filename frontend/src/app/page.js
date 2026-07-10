@@ -2074,6 +2074,7 @@ export default function Home() {
       {(viewMode === "login" || viewMode === "onboarding") && (
         <PremiumAuth 
           initialView={viewMode}
+          onViewChange={(mode) => setViewMode(mode)}
           onLoginSuccess={(userData) => {
             showNotification("Login successful!");
             setUser(userData);
