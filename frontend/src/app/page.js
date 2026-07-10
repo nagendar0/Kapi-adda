@@ -503,7 +503,7 @@ export default function Home() {
       try {
         const parsed = JSON.parse(cookieUser);
         setUser(parsed);
-        if (parsed.email === "kapiadda@gmail.com") {
+        if (parsed.email?.toLowerCase() === "kapiadda@gmail.com") {
           setViewMode("admin");
         } else if (path === "onboarding") {
           setViewMode("onboarding");
@@ -685,7 +685,7 @@ export default function Home() {
       }
     } else {
       if (viewMode === "login") {
-        if (user.email === "kapiadda@gmail.com") {
+        if (user.email?.toLowerCase() === "kapiadda@gmail.com") {
           setViewMode("admin");
         } else {
           setViewMode("customer");
@@ -774,7 +774,7 @@ export default function Home() {
 
   const handleHeaderProfileClick = () => {
     if (user) {
-      if (user.email === "kapiadda@gmail.com") {
+      if (user.email?.toLowerCase() === "kapiadda@gmail.com") {
         setViewMode("admin");
         setAdminTab("profile");
       } else {
@@ -818,7 +818,7 @@ export default function Home() {
       if (res.ok) {
         showNotification("Login successful!");
         setUser(data.user);
-        if (data.user.email === "kapiadda@gmail.com") {
+        if (data.user?.email?.toLowerCase() === "kapiadda@gmail.com") {
           setViewMode("admin");
           loadAdminDashboard();
         } else {
@@ -1231,7 +1231,7 @@ export default function Home() {
           <div className="flex items-center space-x-6">
             {user ? (
               <>
-                {user.email === "kapiadda@gmail.com" && (
+                {user.email?.toLowerCase() === "kapiadda@gmail.com" && (
                   <button 
                     onClick={() => setViewMode("admin")}
                     className={`font-semibold text-sm transition ${viewMode === "admin" ? "text-amber-500" : "text-stone-300 hover:text-amber-500"}`}
@@ -2080,7 +2080,7 @@ export default function Home() {
           onLoginSuccess={(userData) => {
             showNotification("Login successful!");
             setUser(userData);
-            if (userData.email === "kapiadda@gmail.com") {
+            if (userData?.email?.toLowerCase() === "kapiadda@gmail.com") {
               setViewMode("admin");
               loadAdminDashboard();
             } else {
