@@ -378,6 +378,180 @@ function formatTime(ts) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+const asFlatMenu = (source) => (Array.isArray(source) ? source : []).flatMap((entry) => {
+  if (!Array.isArray(entry?.items)) return [entry];
+  return entry.items.map((item) => ({ ...item, category: item.category || entry.category }));
+});
+
+const itemIsAvailable = (item) => !['out_of_stock', 'out of stock', 'unavailable'].includes(String(item?.availability_status || '').toLowerCase()) && item?.is_available !== false;
+
+const itemIsVegetarian = (item) => {
+  const value = item?.is_veg;
+  if (value === false || value === 'false' || value === 0) return false;
+  const text = `${item?.name || ''} ${item?.description || ''}`.toLowerCase();
+  return !['chicken', 'egg', 'mutton', 'meat', 'fish', 'prawn'].some((term) => text.includes(term));
+};
+
+const itemPrice = (item) => Number(item?.price || 0);
+const itemRating = (item) => Number(item?.rating || 0);
+
+const rankItems = (items, query = '') => {
+  const terms = String(query).toLowerCase().split(/\s+/).filter((term) => term.length > 2);
+  return [...items].sort((left, right) => {
+    const score = (item) => {
+      const text = `${item.name || ''} ${item.description || ''} ${item.category || ''}`.toLowerCase();
+      return (terms.reduce((total, term) => total + (text.includes(term) ? 5 : 0), 0) + itemRating(item));
+    };
+    return score(right) - score(left) || itemRating(right) - itemRating(left) || itemPrice(left) - itemPrice(right);
+  });
+};
+
+const listItems = (items) => items.map((item) => `**${item.name}** (Rs.${itemPrice(item)})`).join(', ');
+
+const selectByTerms = (items, terms) => items.filter((item) => {
+  const text = `${item.name || ''} ${item.description || ''} ${item.category || ''}`.toLowerCase();
+  return terms.some((term) => text.includes(term));
+});
+
+function buildLocalAssistantReply({ query, menuItems, mode, planner }) {
+  const normalized = String(query || '').trim().toLowerCase();
+  const allItems = asFlatMenu(menuItems);
+  const available = allItems.filter(itemIsAvailable);
+  const featured = rankItems(available, '').slice(0, 4);
+
+  if (!available.length) {
+    return {
+      reply: 'I am refreshing the menu right now. Please try again in a moment.',
+      items: [],
+      options: ['Refresh menu'],
+    };
+  }
+
+  if (mode === 'planner') {
+    if (normalized.includes('plan another')) {
+      planner.step = 1;
+      return {
+        reply: 'Great. **Step 1 of 3:** What is your mood right now?',
+        items: [],
+        options: ['Happy', 'Calm', 'Tired', 'Hungry'],
+      };
+    }
+
+    if (planner.step === 1) {
+      planner.mood = normalized || 'calm';
+      planner.step = 2;
+      return {
+        reply: 'Nice. **Step 2 of 3:** What would you like to have?',
+        items: [],
+        options: ['Vegetarian', 'Drink', 'Sweet', 'Anything'],
+      };
+    }
+
+    if (planner.step === 2) {
+      planner.preference = normalized || 'anything';
+      planner.step = 3;
+      return {
+        reply: 'Almost there. **Step 3 of 3:** What is your budget in rupees?',
+        items: [],
+        options: ['Rs.50', 'Rs.100', 'Rs.150', 'Rs.200'],
+      };
+    }
+
+    const budgetMatch = normalized.match(/\d+/);
+    if (!budgetMatch) {
+      return {
+        reply: 'Please enter a budget such as **50**, **100**, or **150** rupees.',
+        items: [],
+        options: ['Rs.50', 'Rs.100', 'Rs.150', 'Rs.200'],
+      };
+    }
+
+    const budget = Number(budgetMatch[0]);
+    let choices = available.filter((item) => itemPrice(item) <= budget);
+    if (planner.preference?.includes('vegetarian')) choices = choices.filter(itemIsVegetarian);
+    if (planner.preference?.includes('drink')) choices = selectByTerms(choices, ['coffee', 'tea', 'chai', 'juice', 'shake', 'mojito', 'beverage']);
+    if (planner.preference?.includes('sweet')) choices = selectByTerms(choices, ['cake', 'ice cream', 'shake', 'chocolate', 'sweet']);
+    const recommendations = rankItems(choices.length ? choices : available.filter((item) => itemPrice(item) <= budget), planner.mood).slice(0, 3);
+    planner.step = 1;
+    return {
+      reply: recommendations.length
+        ? `For your **Rs.${budget}** plan, I recommend ${listItems(recommendations)}. These choices fit your preference and are available now.`
+        : `I could not find an available item within **Rs.${budget}**. Try a slightly higher budget and I will build another plan.`,
+      items: recommendations,
+      options: ['Plan another meal', 'Explorer Mode'],
+    };
+  }
+
+  const budgetMatch = normalized.match(/(?:under|below|less than|within|rs\.?|₹)\s*(\d+)/) || (normalized.match(/^\s*(\d+)\s*$/) ? normalized.match(/^\s*(\d+)\s*$/) : null);
+  if (budgetMatch) {
+    const budget = Number(budgetMatch[1]);
+    const choices = rankItems(available.filter((item) => itemPrice(item) <= budget), normalized).slice(0, 4);
+    return {
+      reply: choices.length
+        ? `Here are the best available options under **Rs.${budget}**: ${listItems(choices)}.`
+        : `I could not find an available item under **Rs.${budget}**. Try a higher budget and I will help.`,
+      items: choices,
+    };
+  }
+
+  if (/(cold|chill|rain|winter|cool outside)/.test(normalized)) {
+    const warm = rankItems(selectByTerms(available, ['coffee', 'tea', 'chai', 'hot chocolate', 'malt', 'latte', 'beverage']), normalized).slice(0, 3);
+    const picks = warm.length ? warm : featured.slice(0, 3);
+    return {
+      reply: `It is a good time for something warm. I recommend ${listItems(picks)}. My first pick is **${picks[0]?.name}**.`,
+      items: picks,
+    };
+  }
+
+  if (/(hot|heat|summer|sunny|warm outside)/.test(normalized)) {
+    const cool = rankItems(selectByTerms(available, ['juice', 'shake', 'mojito', 'cooler', 'ice cream', 'cold']), normalized).slice(0, 3);
+    const picks = cool.length ? cool : featured.slice(0, 3);
+    return {
+      reply: `For warm weather, try ${listItems(picks)}. They are refreshing choices from the current menu.`,
+      items: picks,
+    };
+  }
+
+  if (/(vegetarian|veg|veggie)/.test(normalized)) {
+    const picks = rankItems(available.filter(itemIsVegetarian), normalized).slice(0, 4);
+    return {
+      reply: picks.length ? `Here are available vegetarian choices: ${listItems(picks)}.` : 'I could not find vegetarian items in the current menu.',
+      items: picks,
+    };
+  }
+
+  if (/(usual|order again)/.test(normalized)) {
+    return {
+      reply: `Here are popular available choices to start with: ${listItems(featured.slice(0, 3))}.`,
+      items: featured.slice(0, 3),
+    };
+  }
+
+  if (/(special|recommend|popular|best|offer|deal)/.test(normalized)) {
+    return {
+      reply: `My current picks are ${listItems(featured.slice(0, 3))}. Tap a card to see the details.`,
+      items: featured.slice(0, 3),
+    };
+  }
+
+  const directMatches = rankItems(available.filter((item) => {
+    const text = `${item.name || ''} ${item.description || ''} ${item.category || ''}`.toLowerCase();
+    return normalized.split(/\s+/).filter((term) => term.length > 2).some((term) => text.includes(term));
+  }), normalized).slice(0, 4);
+  if (directMatches.length) {
+    return {
+      reply: `I found these available menu options: ${listItems(directMatches)}.`,
+      items: directMatches,
+    };
+  }
+
+  return {
+    reply: `I can help with menu items, vegetarian choices, weather-based recommendations, and budgets. My current picks are ${listItems(featured.slice(0, 3))}.`,
+    items: featured.slice(0, 3),
+    options: ['It is cold outside', 'Vegetarian options', 'Under Rs.100', 'Recommend a special'],
+  };
+}
+
 /* ─────────────────── main component ─────────────────── */
 
 export default function AIAssistant({ 
@@ -403,6 +577,7 @@ export default function AIAssistant({
   const [plannerStep, setPlannerStep] = useState(1);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const localPlannerRef = useRef({ step: 1 });
 
   useEffect(() => {
     let sess = localStorage.getItem('kapi_chat_session_id');
@@ -430,6 +605,7 @@ export default function AIAssistant({
     setActiveMode(mode);
     setIsTyping(true);
     setPlannerStep(1);
+    localPlannerRef.current = { step: 1 };
     
     if (mode === 'planner') {
       const initMsg = {
@@ -643,27 +819,35 @@ export default function AIAssistant({
     setInput('');
     setIsTyping(true);
 
-    if (activeMode === 'planner') {
-      if (plannerStep === 1) setPlannerStep(2);
-      else if (plannerStep === 2) setPlannerStep(3);
-      else if (plannerStep === 3) setPlannerStep(4);
-      else if (plannerStep === 4) setPlannerStep(5);
-      else if (plannerStep === 5) setPlannerStep(1);
-    }
-
     if (!HAS_BACKEND_API) {
+      const localReply = buildLocalAssistantReply({
+        query: cleanedText,
+        menuItems,
+        mode: activeMode,
+        planner: localPlannerRef.current,
+      });
+      setPlannerStep(localPlannerRef.current.step || 1);
       setIsTyping(false);
       setMessages((prev) => [
         ...prev,
         {
           id: Date.now() + 1,
           role: 'bot',
-          text: 'The AI response service is not configured for this deployment yet.',
-          items: [],
+          text: localReply.reply,
+          items: localReply.items || [],
+          options: localReply.options || [],
           timestamp: new Date(),
         },
       ]);
       return;
+    }
+
+    if (activeMode === 'planner') {
+      if (plannerStep === 1) setPlannerStep(2);
+      else if (plannerStep === 2) setPlannerStep(3);
+      else if (plannerStep === 3) setPlannerStep(4);
+      else if (plannerStep === 4) setPlannerStep(5);
+      else if (plannerStep === 5) setPlannerStep(1);
     }
 
     /* fire analytics in background */
