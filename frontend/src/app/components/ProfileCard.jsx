@@ -4,6 +4,9 @@ import { PasswordChecklist } from './PremiumAuth';
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' 
   ? `http://${window.location.hostname}:8000`
   : 'http://127.0.0.1:8000');
+const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname));
+const SUPABASE_URL = 'https://kvjvnrktnkenlsaatmxq.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo';
 
 
 const BACKEND_URL = `${API_BASE}`;
@@ -137,6 +140,26 @@ export default function ProfileCard({ user, onUserUpdate, onSuccessRedirect, onL
 
     setProfileLoading(true);
     try {
+      if (!HAS_BACKEND_API) {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/users?id=eq.${encodeURIComponent(user.id)}`, {
+          method: 'PATCH',
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+            Prefer: 'return=representation',
+          },
+          body: JSON.stringify({ name: name.trim() }),
+        });
+        const rows = await res.json();
+        if (!res.ok || !Array.isArray(rows) || !rows[0]) throw new Error('Failed to update profile');
+        const updatedUser = { ...user, ...rows[0] };
+        setProfileSuccess('Name updated successfully!');
+        setCookie("kapi_user", JSON.stringify(updatedUser), 7);
+        localStorage.setItem("kapi_user", JSON.stringify(updatedUser));
+        onUserUpdate?.(updatedUser);
+        return;
+      }
       let token = localStorage.getItem('kapi_token') || getCookie('kapi_token');
       if ((!token || token === 'null' || token === 'undefined') && user?.id) {
         token = `jwt_mock_token_for_${user.id}`;
@@ -173,6 +196,11 @@ export default function ProfileCard({ user, onUserUpdate, onSuccessRedirect, onL
     setPassError('');
     setPassSuccess('');
     setPassLoading(true);
+    if (!HAS_BACKEND_API) {
+      setPassLoading(false);
+      setPassError('Password reset by email requires the backend service to be configured.');
+      return;
+    }
     try {
       const res = await fetch(`${BACKEND_URL}/api/auth/request-otp`, {
         method: "POST",
@@ -201,6 +229,11 @@ export default function ProfileCard({ user, onUserUpdate, onSuccessRedirect, onL
       return;
     }
     setPassLoading(true);
+    if (!HAS_BACKEND_API) {
+      setPassLoading(false);
+      setPassError('Password reset by email requires the backend service to be configured.');
+      return;
+    }
     try {
       const res = await fetch(`${BACKEND_URL}/api/auth/verify-otp`, {
         method: "POST",
@@ -237,6 +270,11 @@ export default function ProfileCard({ user, onUserUpdate, onSuccessRedirect, onL
     }
 
     setPassLoading(true);
+    if (!HAS_BACKEND_API) {
+      setPassLoading(false);
+      setPassError('Password reset by email requires the backend service to be configured.');
+      return;
+    }
     try {
       const res = await fetch(`${BACKEND_URL}/api/auth/reset-password`, {
         method: "POST",

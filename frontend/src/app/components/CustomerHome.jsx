@@ -7,6 +7,10 @@ import { useBreakpoint, useScreenProfile } from '../utils/responsive';
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' 
   ? `http://${window.location.hostname}:8000`
   : 'http://127.0.0.1:8000');
+const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname));
+const SUPABASE_URL = 'https://kvjvnrktnkenlsaatmxq.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2anZucmt0bmtlbmxzYWF0bXhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo';
+const SUPABASE_HEADERS = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` };
 
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -735,6 +739,11 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
     };
 
     const loadOffers = () => {
+      if (!HAS_BACKEND_API) {
+        const stored = localStorage.getItem('kapi_daily_offers');
+        if (stored) setOffers(JSON.parse(stored));
+        return;
+      }
       fetch(`${API_BASE}/api/offers`)
         .then(res => res.ok ? res.json() : null)
         .then(data => {
@@ -764,6 +773,29 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
 
   // ── Fetch menu ──
   const loadMenu = () => {
+    if (!HAS_BACKEND_API) {
+      Promise.all([
+        fetch(`${SUPABASE_URL}/rest/v1/categories?select=*`, { headers: SUPABASE_HEADERS }),
+        fetch(`${SUPABASE_URL}/rest/v1/menu_items?select=*`, { headers: SUPABASE_HEADERS }),
+      ])
+        .then(async ([categoriesResponse, itemsResponse]) => {
+          if (!categoriesResponse.ok || !itemsResponse.ok) throw new Error('Unable to load menu data');
+          const [categoryRows, itemRows] = await Promise.all([categoriesResponse.json(), itemsResponse.json()]);
+          const categoryMap = Object.fromEntries((categoryRows || []).map((category) => [category.id, category.name]));
+          setCategoriesList((categoryRows || []).filter((category) => !(category.description || '').endsWith('[HIDDEN]')).map((category) => category.name));
+          setMenuItems((itemRows || []).filter((item) => !(categoryRows || []).some((category) => category.id === item.category_id && (category.description || '').endsWith('[HIDDEN]'))).map((item) => ({
+            ...item,
+            category: categoryMap[item.category_id] || 'Menu',
+            is_available: item.availability_status !== 'out_of_stock',
+          })));
+        })
+        .catch((err) => {
+          console.warn('Supabase menu fallback unavailable:', err);
+          setError('Could not load menu. Please try again.');
+        })
+        .finally(() => setLoading(false));
+      return;
+    }
     fetch(`${API_BASE}/api/menu?t=` + Date.now())
       .then((r) => r.json())
       .then((data) => {

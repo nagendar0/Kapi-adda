@@ -8,6 +8,7 @@ import { useBreakpoint, useScreenProfile } from '../utils/responsive';
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' 
   ? `http://${window.location.hostname}:8000`
   : 'http://127.0.0.1:8000');
+const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname));
 
 const SUPABASE_URL = "https://kvjvnrktnkenlsaatmxq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2anZucmt0bmtlbmxzYWF0bXhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo";
@@ -173,6 +174,12 @@ export default function OwnerDashboard({
       }
     };
 
+    if (!HAS_BACKEND_API) {
+      const stored = localStorage.getItem('kapi_daily_offers');
+      if (stored) setOffers(JSON.parse(stored));
+      return;
+    }
+
     fetch(`${API_BASE}/api/offers`)
       .then(res => res.ok ? res.json() : null)
       .then(data => {
@@ -265,6 +272,7 @@ export default function OwnerDashboard({
     }
   };
   const fetchAdmin = async (url, options = {}) => {
+    if (!HAS_BACKEND_API) return new Response(null, { status: 503 });
     const token = localStorage.getItem('kapi_token');
     const headers = {
       'Content-Type': 'application/json',
@@ -456,6 +464,142 @@ export default function OwnerDashboard({
     }
   };
 
+  const fetchAnalyticsFromSupabase = async () => {
+    const [menuItems, logs, reviews, categories] = await Promise.all([
+      fetchSupabaseTable('menu_items', 'select=*').catch(() => []),
+      fetchSupabaseTable('user_activity_logs', 'select=*').catch(() => []),
+      fetchSupabaseTable('reviews', 'select=*').catch(() => []),
+      fetchSupabaseTable('categories', 'select=*').catch(() => []),
+    ]);
+
+    const viewCounts = {};
+    const searchCounts = {};
+    const hourlyCounts = {};
+    (logs || []).forEach((log) => {
+      if (log.activity_type === 'view' && log.target_id) {
+        viewCounts[log.target_id] = (viewCounts[log.target_id] || 0) + 1;
+      }
+      if (log.activity_type === 'search' && log.search_query?.trim()) {
+        const query = log.search_query.trim().toLowerCase();
+        searchCounts[query] = (searchCounts[query] || 0) + 1;
+      }
+      const created = new Date(log.created_at);
+      if (!Number.isNaN(created.getTime())) {
+        const hour = created.getHours();
+        hourlyCounts[hour] = (hourlyCounts[hour] || 0) + 1;
+      }
+    });
+
+    const categoryMap = Object.fromEntries((categories || []).map((category) => [category.id, category.name]));
+    const itemMap = Object.fromEntries((menuItems || []).map((item) => [item.id, item]));
+    const topViewedItems = Object.entries(viewCounts)
+      .sort(([, left], [, right]) => right - left)
+      .slice(0, 8)
+      .flatMap(([id, views]) => itemMap[id] ? [{ id, name: itemMap[id].name || 'Unknown item', views }] : []);
+    const topSearchedItems = Object.entries(searchCounts)
+      .sort(([, left], [, right]) => right - left)
+      .slice(0, 8)
+      .map(([query, count]) => ({ query, count }));
+
+    const demandAlerts = [];
+    const topItem = topViewedItems[0];
+    if (topItem) demandAlerts.push(`High demand: ${topItem.name} has ${topItem.views} customer views. Keep it visible and available.`);
+    const topQuery = topSearchedItems.find(({ query }) => !(menuItems || []).some((item) => {
+      const itemName = String(item.name || '').trim().toLowerCase();
+      return itemName && (itemName.includes(query) || query.includes(itemName));
+    }));
+    if (topQuery) demandAlerts.push(`Unmet demand: customers searched for "${topQuery.query}" ${topQuery.count} times. Consider adding it to the menu.`);
+    const categoryCounts = {};
+    Object.entries(viewCounts).forEach(([itemId, views]) => {
+      const categoryName = categoryMap[itemMap[itemId]?.category_id] || 'General';
+      categoryCounts[categoryName] = (categoryCounts[categoryName] || 0) + views;
+    });
+    const topCategory = Object.entries(categoryCounts).sort(([, left], [, right]) => right - left)[0];
+    if (topCategory) demandAlerts.push(`Category trend: ${topCategory[0]} has the strongest customer interest with ${topCategory[1]} views.`);
+    if (!demandAlerts.length) {
+      demandAlerts.push('System ready: customer activity will appear here as visitors browse and search the menu.');
+      demandAlerts.push(`Catalog insight: ${menuItems?.length || 0} menu items are available for analysis.`);
+    }
+
+    const sentimentCounts = (reviews || []).reduce((counts, review) => {
+      const rating = Number(review.rating);
+      if (rating >= 4) counts.positive += 1;
+      else if (rating === 3) counts.neutral += 1;
+      else counts.negative += 1;
+      return counts;
+    }, { positive: 0, neutral: 0, negative: 0 });
+    const totalReviews = (reviews || []).length;
+    const percent = (value) => totalReviews ? Math.floor((value / totalReviews) * 100) : 0;
+
+    setAnalytics({
+      total_views: Object.values(viewCounts).reduce((total, count) => total + count, 0),
+      top_viewed_items: topViewedItems,
+      top_searched_items: topSearchedItems,
+      activity_by_hour: Object.entries(hourlyCounts).sort(([left], [right]) => Number(left) - Number(right)).map(([hour, count]) => ({ hour: Number(hour), count })),
+      demand_alerts: demandAlerts.slice(0, 5),
+      sentiment_stats: {
+        positive: percent(sentimentCounts.positive),
+        neutral: percent(sentimentCounts.neutral),
+        negative: percent(sentimentCounts.negative),
+        total_reviews: totalReviews,
+        summary: totalReviews ? 'Sentiment is calculated from the customer ratings saved in your database.' : 'No customer reviews submitted yet. Submit a review with a comment to see sentiment analysis.',
+      },
+    });
+  };
+
+  const fetchAdminUsersFromSupabase = async () => {
+    const activityCutoff = new Date(Date.now() - (2 * 60 * 1000)).toISOString();
+    const [users, orders, reviews, menuItems, preferences, activityLogs] = await Promise.all([
+      fetchSupabaseTable('users', 'select=*'),
+      fetchSupabaseTable('orders', 'select=*').catch(() => []),
+      fetchSupabaseTable('reviews', 'select=*').catch(() => []),
+      fetchSupabaseTable('menu_items', 'select=id,name').catch(() => []),
+      fetchSupabaseTable('user_preferences', 'select=*').catch(() => []),
+      fetchSupabaseTable('user_activity_logs', `select=user_id,created_at&created_at=gte.${encodeURIComponent(activityCutoff)}&order=created_at.desc`).catch(() => []),
+    ]);
+
+    const menuMap = Object.fromEntries((menuItems || []).map((item) => [item.id, item.name || 'Unknown item']));
+    const preferencesByUser = Object.fromEntries((preferences || []).map((preference) => [preference.user_id, preference]));
+    const ordersByUser = {};
+    (orders || []).forEach((order) => {
+      if (order.user_id) (ordersByUser[order.user_id] ||= []).push(order);
+    });
+    const reviewsByUser = {};
+    (reviews || []).forEach((review) => {
+      if (!review.user_id) return;
+      (reviewsByUser[review.user_id] ||= []).push({ ...review, item_name: menuMap[review.menu_item_id] || 'Unknown item' });
+    });
+    const lastActiveByUser = {};
+    (activityLogs || []).forEach((log) => {
+      if (!log.user_id || !log.created_at) return;
+      const current = new Date(log.created_at);
+      const previous = lastActiveByUser[log.user_id];
+      if (!Number.isNaN(current.getTime()) && (!previous || current > previous)) lastActiveByUser[log.user_id] = current;
+    });
+
+    setAdminUsers((users || []).filter((user) => user.role !== 'admin').map((user) => {
+      const userOrders = ordersByUser[user.id] || [];
+      const userReviews = reviewsByUser[user.id] || [];
+      const lastActive = lastActiveByUser[user.id];
+      return {
+        id: user.id,
+        name: user.name || 'Anonymous',
+        email: user.email || '',
+        mobile: user.mobile || '',
+        role: user.role || 'customer',
+        created_at: user.created_at || '',
+        is_online: Boolean(lastActive && (Date.now() - lastActive.getTime()) <= 55000),
+        last_seen: lastActive?.toISOString() || null,
+        total_orders: userOrders.length,
+        total_spent: userOrders.filter((order) => order.status !== 'cancelled').reduce((total, order) => total + Number(order.total_amount || order.total || 0), 0),
+        avg_rating_given: userReviews.length ? Number((userReviews.reduce((total, review) => total + Number(review.rating || 0), 0) / userReviews.length).toFixed(2)) : null,
+        reviews: userReviews,
+        orders: userOrders,
+        preferences: preferencesByUser[user.id] || {},
+      };
+    }));
+  };
+
   const fetchAnalytics = async () => {
     try {
       setLoadingAnalytics(true);
@@ -463,9 +607,17 @@ export default function OwnerDashboard({
       if (res.ok) {
         const data = await res.json();
         setAnalytics(data);
+        return;
       }
+      throw new Error(`Analytics API failed: ${res.status}`);
     } catch (err) {
       console.warn('Analytics API unavailable:', err);
+      try {
+        await fetchAnalyticsFromSupabase();
+      } catch (fallbackErr) {
+        console.warn('Supabase analytics fallback unavailable:', fallbackErr);
+        setAnalytics(null);
+      }
     } finally {
       setLoadingAnalytics(false);
     }
@@ -479,9 +631,17 @@ export default function OwnerDashboard({
       if (res.ok) {
         const data = await res.json();
         setAdminUsers(data.users || []);
+        return;
       }
+      throw new Error(`Users API failed: ${res.status}`);
     } catch (err) {
       console.warn('Users API unavailable:', err);
+      try {
+        await fetchAdminUsersFromSupabase();
+      } catch (fallbackErr) {
+        console.warn('Supabase users fallback unavailable:', fallbackErr);
+        setAdminUsers([]);
+      }
     } finally {
       if (!silent) setUsersLoading(false);
     }
@@ -498,11 +658,12 @@ export default function OwnerDashboard({
 
   // Auto-refresh users list every 3 seconds — near real-time online/offline detection
   useEffect(() => {
+    if (activeTab !== 'users') return undefined;
     const interval = setInterval(() => {
       fetchAdminUsers(true); // silent refresh - no loading spinner
-    }, 3000);
+    }, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [activeTab]);
 
   // Keep the detail panel in sync: when adminUsers refreshes, update selectedUser to reflect new is_online status
   useEffect(() => {

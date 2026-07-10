@@ -7,6 +7,10 @@ import { useScreenProfile } from '../utils/responsive';
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' 
   ? `http://${window.location.hostname}:8000`
   : 'http://127.0.0.1:8000');
+const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname));
+const SUPABASE_URL = 'https://kvjvnrktnkenlsaatmxq.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo';
+const SUPABASE_HEADERS = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` };
 
 
 function StarRating({ rating, interactive = false, onRate }) {
@@ -129,7 +133,10 @@ export default function FoodDetail({ item, user, onClose, onAddToCart, breakpoin
     if (!item) return;
     setReviews([]);
     setReviewsLoading(true);
-    fetch(`${API_BASE}/api/reviews/${item.id}`)
+    const reviewsUrl = HAS_BACKEND_API
+      ? `${API_BASE}/api/reviews/${item.id}`
+      : `${SUPABASE_URL}/rest/v1/reviews?select=*&menu_item_id=eq.${encodeURIComponent(item.id)}`;
+    fetch(reviewsUrl, { headers: HAS_BACKEND_API ? undefined : SUPABASE_HEADERS })
       .then((res) => res.ok ? res.json() : [])
       .catch(() => [])
       .then((data) => {
@@ -142,7 +149,10 @@ export default function FoodDetail({ item, user, onClose, onAddToCart, breakpoin
   useEffect(() => {
     if (!item) return;
     setSimilarItems([]);
-    fetch(`${API_BASE}/api/menu/${item.id}/similar`)
+    const similarUrl = HAS_BACKEND_API
+      ? `${API_BASE}/api/menu/${item.id}/similar`
+      : `${SUPABASE_URL}/rest/v1/menu_items?select=*&category_id=eq.${encodeURIComponent(item.category_id || '')}&id=neq.${encodeURIComponent(item.id)}`;
+    fetch(similarUrl, { headers: HAS_BACKEND_API ? undefined : SUPABASE_HEADERS })
       .then((res) => res.ok ? res.json() : null)
       .catch(() => null)
       .then((data) => {
@@ -161,9 +171,12 @@ export default function FoodDetail({ item, user, onClose, onAddToCart, breakpoin
     setSubmitError('');
     setSubmitLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/reviews`, {
+      const res = await fetch(HAS_BACKEND_API ? `${API_BASE}/api/reviews` : `${SUPABASE_URL}/rest/v1/reviews`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(HAS_BACKEND_API ? {} : { ...SUPABASE_HEADERS, Prefer: 'return=representation' }),
+        },
         body: JSON.stringify({
           user_id: user.id,
           menu_item_id: item.id,
@@ -178,7 +191,9 @@ export default function FoodDetail({ item, user, onClose, onAddToCart, breakpoin
       setComment('');
       window.dispatchEvent(new Event('kapi_menu_updated'));
       // Refresh reviews
-      const updated = await fetch(`${API_BASE}/api/reviews/${item.id}`)
+      const updated = await fetch(HAS_BACKEND_API ? `${API_BASE}/api/reviews/${item.id}` : `${SUPABASE_URL}/rest/v1/reviews?select=*&menu_item_id=eq.${encodeURIComponent(item.id)}`, {
+        headers: HAS_BACKEND_API ? undefined : SUPABASE_HEADERS,
+      })
         .then((r) => r.ok ? r.json() : [])
         .catch(() => []);
       setReviews(updated && Array.isArray(updated.reviews) ? updated.reviews : (Array.isArray(updated) ? updated : []));

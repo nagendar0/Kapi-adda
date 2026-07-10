@@ -7,6 +7,7 @@ import { useScreenProfile } from '../utils/responsive';
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' 
   ? `http://${window.location.hostname}:8000`
   : 'http://127.0.0.1:8000');
+const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname));
 
 
 // Quick replies managed dynamically by active mode
@@ -441,6 +442,10 @@ export default function AIAssistant({
       };
       setMessages([initMsg]);
       try {
+        if (!HAS_BACKEND_API) {
+          setIsTyping(false);
+          return;
+        }
         await fetch(`${API_BASE}/api/ai/assistant`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -458,6 +463,10 @@ export default function AIAssistant({
       };
       setMessages([initMsg]);
       try {
+        if (!HAS_BACKEND_API) {
+          setIsTyping(false);
+          return;
+        }
         await fetch(`${API_BASE}/api/ai/assistant`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -640,6 +649,21 @@ export default function AIAssistant({
       else if (plannerStep === 3) setPlannerStep(4);
       else if (plannerStep === 4) setPlannerStep(5);
       else if (plannerStep === 5) setPlannerStep(1);
+    }
+
+    if (!HAS_BACKEND_API) {
+      setIsTyping(false);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now() + 1,
+          role: 'bot',
+          text: 'The AI response service is not configured for this deployment yet.',
+          items: [],
+          timestamp: new Date(),
+        },
+      ]);
+      return;
     }
 
     /* fire analytics in background */

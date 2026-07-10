@@ -19,6 +19,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined'
   ? `http://${window.location.hostname}:8000`
   : 'http://127.0.0.1:8000');
+const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname));
 
 // Cookie helper functions
 const getCookie = (name) => {
@@ -461,7 +462,51 @@ export default function Home() {
   }, [viewMode]);
 
   // Load Initial Menu & Data
+  const loadMenuFromSupabase = async () => {
+    const [{ data: categoryRows, error: categoryError }, { data: itemRows, error: itemError }, { data: reviewRows, error: reviewError }] = await Promise.all([
+      supabase.from('categories').select('*'),
+      supabase.from('menu_items').select('*'),
+      supabase.from('reviews').select('menu_item_id,rating'),
+    ]);
+    if (categoryError || itemError || reviewError) {
+      throw new Error(categoryError?.message || itemError?.message || reviewError?.message || 'Unable to load menu data');
+    }
+
+    const ratingsByItem = {};
+    (reviewRows || []).forEach((review) => {
+      if (!review.menu_item_id || Number.isNaN(Number(review.rating))) return;
+      (ratingsByItem[review.menu_item_id] ||= []).push(Number(review.rating));
+    });
+    const groups = (categoryRows || [])
+      .filter((category) => !(category.description || '').endsWith('[HIDDEN]'))
+      .map((category) => ({
+        id: category.id,
+        category: category.name,
+        description: category.description,
+        items: (itemRows || []).filter((item) => item.category_id === category.id).map((item) => {
+          const ratings = ratingsByItem[item.id] || [];
+          return {
+            ...item,
+            rating: ratings.length ? Number((ratings.reduce((total, rating) => total + rating, 0) / ratings.length).toFixed(1)) : (item.rating || 0),
+            rating_count: ratings.length,
+            is_available: item.availability_status !== 'out_of_stock',
+          };
+        }),
+      }));
+    setMenu(groups);
+    setCategories(groups.map((group) => group.category));
+  };
+
   const loadMenu = async () => {
+    if (!HAS_BACKEND_API) {
+      try {
+        await loadMenuFromSupabase();
+      } catch (fallbackErr) {
+        console.warn("Supabase menu fallback unavailable:", fallbackErr);
+        setMenu([]);
+      }
+      return;
+    }
     try {
       const res = await fetch(`${BACKEND_URL}/api/menu?t=${Date.now()}`);
       const data = await res.json();
@@ -476,11 +521,17 @@ export default function Home() {
       }
     } catch (err) {
       console.warn("Menu API unavailable:", err);
-      setMenu([]);
+      try {
+        await loadMenuFromSupabase();
+      } catch (fallbackErr) {
+        console.warn("Supabase menu fallback unavailable:", fallbackErr);
+        setMenu([]);
+      }
     }
   };
 
   const loadAdminDashboard = async () => {
+    if (!HAS_BACKEND_API) return;
     try {
       const res = await fetch(`${BACKEND_URL}/api/admin/dashboard`);
       const data = await res.json();
@@ -600,7 +651,7 @@ export default function Home() {
   // Pings every 25s while the tab is VISIBLE so admin sees user as Online.
   // Immediately signals offline when the tab is hidden, closed, or unmounted.
   useEffect(() => {
-    if (!user || user.role === 'admin') return;
+    if (!HAS_BACKEND_API || !user || user.role === 'admin') return;
     const token = typeof window !== 'undefined' ? localStorage.getItem('kapi_token') : null;
     if (!token) return;
 
@@ -651,20 +702,13 @@ export default function Home() {
     };
   }, [user]);
 
-  // Disable window scrollbars completely on login/onboarding views
+  // Keep document scrolling available on the compact authentication screens.
   useEffect(() => {
     if (typeof document !== "undefined") {
-      if (viewMode === "login" || viewMode === "onboarding") {
-        document.body.style.overflow = "hidden";
-        document.documentElement.style.overflow = "hidden";
-        document.body.style.height = "100vh";
-        document.documentElement.style.height = "100vh";
-      } else {
-        document.body.style.overflow = "";
-        document.documentElement.style.overflow = "";
-        document.body.style.height = "";
-        document.documentElement.style.height = "";
-      }
+      document.body.style.overflow = "";
+      document.documentElement.style.overflow = "";
+      document.body.style.height = "";
+      document.documentElement.style.height = "";
     }
     return () => {
       if (typeof document !== "undefined") {
@@ -1182,8 +1226,8 @@ export default function Home() {
 
   return (
     <div 
-      className={isAuthView ? "w-full h-full bg-[#090503] text-stone-100 font-sans fixed inset-0 overflow-hidden" : "min-h-screen bg-[#090503] text-stone-100 font-sans pb-16 relative pt-16"}
-      style={isAuthView ? { position: 'fixed', inset: 0, height: '100%', width: '100%', overflow: 'hidden' } : { width: '100%', maxWidth: '100vw', overflowX: 'hidden' }}
+      className={isAuthView ? "w-full min-h-screen bg-[#090503] text-stone-100 font-sans relative overflow-x-hidden overflow-y-auto" : "min-h-screen bg-[#090503] text-stone-100 font-sans pb-16 relative pt-16"}
+      style={isAuthView ? { minHeight: '100dvh', width: '100%', overflowX: 'hidden', overflowY: 'auto' } : { width: '100%', maxWidth: '100vw', overflowX: 'hidden' }}
     >
       <style dangerouslySetInnerHTML={{ __html: `
         html, body, #__next {
@@ -1194,8 +1238,8 @@ export default function Home() {
       {isAuthView && (
         <style dangerouslySetInnerHTML={{ __html: `
           html, body {
-            overflow: hidden !important;
-            height: 100% !important;
+            overflow-x: hidden !important;
+            overflow-y: auto !important;
             min-height: 100% !important;
           }
         `}} />

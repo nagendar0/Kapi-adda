@@ -7,6 +7,10 @@ import { useScreenProfile } from '../utils/responsive';
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' 
   ? `http://${window.location.hostname}:8000`
   : 'http://127.0.0.1:8000');
+const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname));
+const SUPABASE_URL = 'https://kvjvnrktnkenlsaatmxq.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2anZucmt0bmtlbmxzYWF0bXhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo';
+const SUPABASE_HEADERS = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` };
 
 
 function StarRating({ rating, count }) {
@@ -312,6 +316,23 @@ export default function FoodCatalog({ user, onViewFood, onAddToCart, cart, onOpe
     try {
       setLoading(true);
       setError(null);
+      if (!HAS_BACKEND_API) {
+        const [categoriesResponse, itemsResponse] = await Promise.all([
+          fetch(`${SUPABASE_URL}/rest/v1/categories?select=*`, { headers: SUPABASE_HEADERS }),
+          fetch(`${SUPABASE_URL}/rest/v1/menu_items?select=*`, { headers: SUPABASE_HEADERS }),
+        ]);
+        if (!categoriesResponse.ok || !itemsResponse.ok) throw new Error('Unable to load menu data');
+        const [categoryRows, itemRows] = await Promise.all([categoriesResponse.json(), itemsResponse.json()]);
+        const visibleCategories = (categoryRows || []).filter((category) => !(category.description || '').endsWith('[HIDDEN]'));
+        const categoryMap = Object.fromEntries(visibleCategories.map((category) => [category.id, category.name]));
+        setCategoriesList(visibleCategories.map((category) => category.name));
+        setMenuItems((itemRows || []).filter((item) => categoryMap[item.category_id]).map((item) => ({
+          ...item,
+          category: categoryMap[item.category_id],
+          is_available: item.availability_status !== 'out_of_stock',
+        })));
+        return;
+      }
       const res = await fetch(`${API_BASE}/api/menu?t=` + Date.now());
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
