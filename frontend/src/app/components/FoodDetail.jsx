@@ -5,7 +5,7 @@ import { getImageForItem } from '../utils/imageMapper';
 import { useScreenProfile } from '../utils/responsive';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' 
-  ? (window.location.hostname.endsWith('vercel.app') ? 'http://localhost:8000' : `http://${window.location.hostname}:8000`)
+  ? `http://${window.location.hostname}:8000`
   : 'http://127.0.0.1:8000');
 
 
@@ -129,7 +129,7 @@ export default function FoodDetail({ item, user, onClose, onAddToCart, breakpoin
     if (!item) return;
     setReviews([]);
     setReviewsLoading(true);
-    fetch(`http://127.0.0.1:8000/api/reviews/${item.id}`)
+    fetch(`${API_BASE}/api/reviews/${item.id}`)
       .then((res) => res.ok ? res.json() : [])
       .catch(() => [])
       .then((data) => {
@@ -142,7 +142,7 @@ export default function FoodDetail({ item, user, onClose, onAddToCart, breakpoin
   useEffect(() => {
     if (!item) return;
     setSimilarItems([]);
-    fetch(`http://127.0.0.1:8000/api/menu/${item.id}/similar`)
+    fetch(`${API_BASE}/api/menu/${item.id}/similar`)
       .then((res) => res.ok ? res.json() : null)
       .catch(() => null)
       .then((data) => {
@@ -178,7 +178,7 @@ export default function FoodDetail({ item, user, onClose, onAddToCart, breakpoin
       setComment('');
       window.dispatchEvent(new Event('kapi_menu_updated'));
       // Refresh reviews
-      const updated = await fetch(`http://127.0.0.1:8000/api/reviews/${item.id}`)
+      const updated = await fetch(`${API_BASE}/api/reviews/${item.id}`)
         .then((r) => r.ok ? r.json() : [])
         .catch(() => []);
       setReviews(updated && Array.isArray(updated.reviews) ? updated.reviews : (Array.isArray(updated) ? updated : []));

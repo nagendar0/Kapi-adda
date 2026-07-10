@@ -6,7 +6,7 @@ import { getImageForItem } from '../utils/imageMapper';
 import { useBreakpoint, useScreenProfile } from '../utils/responsive';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' 
-  ? (window.location.hostname.endsWith('vercel.app') ? 'http://localhost:8000' : `http://${window.location.hostname}:8000`)
+  ? `http://${window.location.hostname}:8000`
   : 'http://127.0.0.1:8000');
 
 
@@ -1230,7 +1230,7 @@ export default function OwnerDashboard({
     };
 
     try {
-      const res = await fetchAdmin(`http://127.0.0.1:8000/api/admin/categories/${cat.id}`, {
+      const res = await fetchAdmin(`${API_BASE}/api/admin/categories/${cat.id}`, {
         method: 'PATCH',
         body: JSON.stringify(payload)
       });
@@ -1262,7 +1262,7 @@ export default function OwnerDashboard({
     setFlatMenu(prevMenu => prevMenu.filter(m => m.category_id !== catId));
 
     try {
-      const res = await fetchAdmin(`http://127.0.0.1:8000/api/admin/categories/${catId}`, {
+      const res = await fetchAdmin(`${API_BASE}/api/admin/categories/${catId}`, {
         method: 'DELETE'
       });
       if (!res.ok) {
@@ -1354,7 +1354,7 @@ export default function OwnerDashboard({
     if (isNaN(qty)) return;
 
     try {
-      const res = await fetchAdmin(`http://127.0.0.1:8000/api/admin/inventory/${id}`, {
+      const res = await fetchAdmin(`${API_BASE}/api/admin/inventory/${id}`, {
         method: 'PATCH',
         body: JSON.stringify({ quantity: qty })
       });

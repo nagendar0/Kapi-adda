@@ -17,7 +17,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined'
-  ? (window.location.hostname.endsWith('vercel.app') ? 'http://localhost:8000' : `http://${window.location.hostname}:8000`)
+  ? `http://${window.location.hostname}:8000`
   : 'http://127.0.0.1:8000');
 
 // Cookie helper functions
