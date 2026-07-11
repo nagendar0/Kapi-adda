@@ -1230,12 +1230,20 @@ export default function Home() {
   };
 
   const flatMenuItems = useMemo(() => {
-    return Array.isArray(menu) ? menu.flatMap(catGroup => 
-      (catGroup.items || []).map(item => ({
-        ...item,
-        category: catGroup.category
-      }))
-    ) : [];
+    try {
+      return Array.isArray(menu) ? menu.flatMap(catGroup => 
+        catGroup && Array.isArray(catGroup.items) ? catGroup.items.map(item => {
+          if (!item) return [];
+          return {
+            ...item,
+            category: catGroup.category || ''
+          };
+        }) : []
+      ) : [];
+    } catch (e) {
+      console.error("Error generating flatMenuItems:", e);
+      return [];
+    }
   }, [menu]);
 
   if (!mounted) {
