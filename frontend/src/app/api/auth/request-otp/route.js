@@ -41,13 +41,13 @@ export async function POST(request) {
     // 2. Generate random 6-digit OTP code
     const otp = String(Math.floor(100000 + Math.random() * 900000));
 
-    // 3. Store OTP in user_activity_logs
+    // 3. Store OTP in user_activity_logs using activity_type 'search'
     await supabaseRest('user_activity_logs', '', {
       method: 'POST',
       body: JSON.stringify({
         user_id: user.id,
-        activity_type: 'forgot_password_otp',
-        search_query: otp
+        activity_type: 'search',
+        search_query: `otp_code:${otp}`
       })
     });
 

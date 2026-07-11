@@ -38,10 +38,10 @@ export async function POST(request) {
     }
     const user = users[0];
 
-    // 2. Fetch latest OTP log
+    // 2. Fetch latest OTP log (activity_type 'search', search_query starting with 'otp_code:')
     const logs = await supabaseRest(
       'user_activity_logs',
-      `select=*&user_id=eq.${encodeURIComponent(user.id)}&activity_type=eq.forgot_password_otp&order=created_at.desc&limit=1`
+      `select=*&user_id=eq.${encodeURIComponent(user.id)}&activity_type=eq.search&search_query=like.otp_code:*&order=created_at.desc&limit=1`
     );
 
     if (!logs || !logs[0]) {
@@ -52,7 +52,9 @@ export async function POST(request) {
     const logTime = new Date(latestLog.created_at).getTime();
     const isExpired = Date.now() - logTime > 15 * 60 * 1000; // 15 minutes validity
 
-    if (isExpired || latestLog.search_query !== otpCode) {
+    const loggedCode = latestLog.search_query.replace('otp_code:', '').trim();
+
+    if (isExpired || loggedCode !== otpCode) {
       return NextResponse.json({ detail: 'Invalid or expired verification code.' }, { status: 400 });
     }
 
