@@ -2071,6 +2071,267 @@ def _chat_assistant_logic(msg: str, user_id: Optional[str], session_id: Optional
         except Exception:
             pass
 
+    # -------------------------------------------------------------------------
+    # SMART HYBRID NLP & MULTI-LLM CHATBOT ENGINE
+    # -------------------------------------------------------------------------
+    api_key_gemini = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    api_key_openai = os.environ.get("OPENAI_API_KEY")
+
+    # Get user info for personalization
+    user_name = "Guest"
+    user_pref_summary = "None specified"
+    if user_id:
+        try:
+            user_res = db.request("GET", "users", params={"id": f"eq.{user_id}"})
+            if user_res:
+                user_name = user_res[0].get("name", "Guest")
+        except Exception:
+            pass
+        try:
+            prefs_res = db.request("GET", "user_preferences", params={"user_id": f"eq.{user_id}"})
+            if prefs_res and prefs_res[0]:
+                p = prefs_res[0]
+                user_pref_summary = f"Veg/Non-Veg: {p.get('veg_preference')}, Fav Categories: {p.get('favorite_categories')}, Dietary: {p.get('dietary_preferences')}, Spice Level: {p.get('spice_preference')}"
+        except Exception:
+            pass
+
+    # Today's Offer Details
+    today_offer_details = "None running today."
+    try:
+        day_code = str(datetime.now().isoweekday() % 7)
+        today_offer = offers.get(day_code)
+        if today_offer and today_offer.get("isActive"):
+            today_offer_details = f"Title: {today_offer.get('title')}, Subtitle: {today_offer.get('subtitle')}"
+    except Exception:
+        pass
+
+    # Simplify menu details to send to the LLM (if used)
+    simplified_menu = []
+    for item in processed_items:
+        simplified_menu.append({
+            "name": item.get("name"),
+            "price": item.get("price"),
+            "category": item.get("category"),
+            "rating": item.get("rating", 0),
+            "availability": item.get("availability_status", "available"),
+            "description": item.get("description", "")
+        })
+
+    llm_response_text = None
+    if api_key_gemini:
+        try:
+            prompt = f"""You are Kapi Adda AI, a friendly, premium cafe assistant for the cafe "Kapi Adda".
+User Profile: Name: {user_name}, Preferences: {user_pref_summary}
+Active Offer: {today_offer_details}
+Menu Items: {json.dumps(simplified_menu)}
+User Query: "{msg_clean}"
+Instructions:
+- Respond in a warm, polite, and helpful tone.
+- Answer the query accurately using the menu context.
+- Output your answer in valid JSON format ONLY:
+{{
+  "reply": "Your response text here. Use emojis! ☕🥐",
+  "recommended_item_names": ["item name 1", "item name 2"]
+}}
+"""
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key_gemini}"
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}]
+            }
+            r = requests.post(url, headers=headers, json=payload, timeout=6)
+            if r.status_code == 200:
+                resp_json = r.json()
+                try:
+                    llm_response_text = resp_json["candidates"][0]["content"]["parts"][0]["text"].strip()
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"Gemini API direct call failed: {e}")
+
+    elif api_key_openai:
+        try:
+            prompt = f"""You are Kapi Adda AI, a friendly, premium cafe assistant.
+User Profile: Name: {user_name}, Preferences: {user_pref_summary}
+Active Offer: {today_offer_details}
+Menu Items: {json.dumps(simplified_menu)}
+User Query: "{msg_clean}"
+Instructions:
+- Respond in a warm, polite, and helpful tone. Use emojis!
+- Output in JSON format ONLY:
+{{
+  "reply": "Conversational response",
+  "recommended_item_names": ["item name 1", "item name 2"]
+}}
+"""
+            url = "https://api.openai.com/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {api_key_openai}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}],
+                "response_format": {"type": "json_object"}
+            }
+            r = requests.post(url, headers=headers, json=payload, timeout=6)
+            if r.status_code == 200:
+                llm_response_text = r.json()["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            print(f"OpenAI API call failed: {e}")
+
+    # Process LLM response if successfully fetched
+    if llm_response_text:
+        try:
+            if "```json" in llm_response_text:
+                llm_response_text = llm_response_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in llm_response_text:
+                llm_response_text = llm_response_text.split("```")[1].split("```")[0].strip()
+
+            parsed_res = json.loads(llm_response_text)
+            llm_reply = parsed_res.get("reply", "")
+            rec_names = parsed_res.get("recommended_item_names", [])
+
+            matched_items = []
+            for name in rec_names:
+                match = next((i for i in processed_items if i["name"].lower() == name.lower()), None)
+                if not match:
+                    match = next((i for i in processed_items if name.lower() in i["name"].lower()), None)
+                if match and match not in matched_items:
+                    matched_items.append(match)
+
+            if not matched_items and rec_names:
+                for name in rec_names:
+                    for i in processed_items:
+                        if name.lower()[:4] in i["name"].lower() and i not in matched_items:
+                            matched_items.append(i)
+                            break
+
+            return {
+                "reply": llm_reply,
+                "items": matched_items[:4]
+            }
+        except Exception as parse_err:
+            print(f"LLM JSON parsing error: {parse_err}")
+
+    # -------------------------------------------------------------------------
+    # STATE-OF-THE-ART LOCAL RULE-BASED NLP CHAT ENGINE (NO EXTERNAL LLM KEYS)
+    # -------------------------------------------------------------------------
+    
+    # 1. Helper to find in-stock recommendations
+    def get_top_available_items(limit=3):
+        available_items = [i for i in processed_items if i.get("availability_status") == "available"]
+        return sorted(available_items, key=lambda x: (float(x.get("rating") or 0), x.get("rating_count", 0)), reverse=True)[:limit]
+
+    # 2. INTENT: SPECIFIC PRODUCT INQUIRY
+    matched_product = None
+    sorted_items_by_len = sorted(processed_items, key=lambda x: len(x["name"]), reverse=True)
+    for item in sorted_items_by_len:
+        if item["name"].lower() in msg_clean:
+            matched_product = item
+            break
+
+    if matched_product:
+        availability = matched_product.get("availability_status", "available")
+        is_out_of_stock = availability == "out_of_stock"
+        pieces_str = f" ({matched_product['pieces']})" if matched_product.get("pieces") else ""
+
+        # A. Reviews & Ratings Query
+        if any(w in msg_clean for w in ["review", "rating", "star", "comment", "feedback", "recommend"]):
+            rating_val = matched_product.get("rating", 0.0)
+            rating_count = matched_product.get("rating_count", 0)
+
+            # If no reviews / unrated (Fulfill: "if the not rating, no review try it first")
+            if rating_count == 0 or rating_val == 0:
+                reply = (
+                    f"Our delicious **{matched_product['name']}**{pieces_str} doesn't have any reviews or ratings yet since it's fresh off our kitchen! 👨‍🍳\n\n"
+                    f"Would you like to **try it first** and be the very first customer to write a review? We guarantee it is absolutely wonderful and priced at just **₹{matched_product['price']:.0f}**! 🌟"
+                )
+                return {"reply": reply, "items": [matched_product]}
+            
+            reviews_list = []
+            try:
+                reviews_res = db.request("GET", "reviews", params={"menu_item_id": f"eq.{matched_product['id']}"})
+                reviews_list = [r.get("review_text") or r.get("comment") or "" for r in reviews_res if r.get("review_text") or r.get("comment")]
+            except Exception:
+                pass
+
+            reply = f"**{matched_product['name']}** has a guest rating of **{rating_val} ★** based on **{rating_count} review{'s' if rating_count != 1 else ''}**! 🏆"
+            if reviews_list:
+                selected_review = random.choice(reviews_list)
+                reply += f"\n\nHere is what our guests say: *\"{selected_review}\"* ❤️"
+            else:
+                reply += "\n\nIt is one of our highly recommended items. Would you like to add it to your order? ☕️"
+
+            return {"reply": reply, "items": [matched_product]}
+
+        # B. Price / Cost Query
+        if any(w in msg_clean for w in ["price", "cost", "how much", "rupee", "rs", "₹"]):
+            reply = f"The price of **{matched_product['name']}**{pieces_str} is **₹{matched_product['price']:.0f}**. "
+            if is_out_of_stock:
+                reply += "It is currently out of stock today, but we are brewing fresh batches soon! ☕"
+            else:
+                reply += "It is available and ready to order! 🛵"
+            return {"reply": reply, "items": [matched_product]}
+
+        # C. Availability Query
+        if any(w in msg_clean for w in ["available", "stock", "have", "buy", "get"]):
+            if is_out_of_stock:
+                cat_id = matched_product.get("category_id")
+                alternatives = [i for i in processed_items if i.get("category_id") == cat_id and i.get("availability_status") == "available" and i["id"] != matched_product["id"]]
+                sorted_alts = sorted(alternatives, key=lambda x: (float(x.get("rating") or 0), x.get("rating_count", 0)), reverse=True)[:2]
+                
+                reply = f"Oh, I'm sorry! **{matched_product['name']}** is out of stock right now. 😔 "
+                if sorted_alts:
+                    alt_str = " or ".join([f"**{i['name']}** (₹{i['price']:.0f})" for i in sorted_alts])
+                    reply += f"But you can check out our other popular options in this category, like {alt_str}! I've placed them below."
+                else:
+                    reply += "Please check back later or try exploring our other fresh menu items!"
+                return {"reply": reply, "items": sorted_alts}
+            else:
+                reply = f"Yes, we have **{matched_product['name']}**! It is in stock and ready to order for **₹{matched_product['price']:.0f}**. Would you like to add it to your cart? 🛒"
+                return {"reply": reply, "items": [matched_product]}
+
+        # D. General Item Inquiry
+        reply = (
+            f"**{matched_product['name']}**{pieces_str} is priced at **₹{matched_product['price']:.0f}**.\n\n"
+            f"*Description*: {matched_product.get('description', 'A premium freshly prepared choice.')}\n"
+        )
+        if matched_product.get("rating_count", 0) > 0:
+            reply += f"*Rating*: **{matched_product.get('rating')} ★** ({matched_product.get('rating_count')} reviews)"
+        else:
+            reply += "*Rating*: **Not rated yet**! (Why not try it first? 👨‍🍳)"
+        return {"reply": reply, "items": [matched_product]}
+
+    # 3. INTENT: TRY FIRST / UNRATED PRODUCTS
+    if any(k in msg_clean for k in ["try first", "no review", "no rating", "unrated", "new items", "not rated", "never rated", "without reviews"]):
+        unrated_items = [i for i in processed_items if i.get("availability_status") == "available" and (i.get("rating_count", 0) == 0 or i.get("rating", 0.0) == 0)]
+        if unrated_items:
+            selected_unrated = unrated_items[:3]
+            names_list = ", ".join([f"**{i['name']}** (₹{i['price']:.0f})" for i in selected_unrated])
+            reply = (
+                f"Here are some fresh additions to our kitchen that haven't been rated yet: {names_list}! 👨‍🍳\n\n"
+                f"Would you like to **try them first** and leave the very first review? We would love to hear your feedback! 🌟"
+            )
+            return {"reply": reply, "items": selected_unrated}
+        else:
+            lowest_rated_items = sorted([i for i in processed_items if i.get("availability_status") == "available"], key=lambda x: x.get("rating_count", 0))[:3]
+            names_list = ", ".join([f"**{i['name']}** (₹{i['price']:.0f})" for i in lowest_rated_items])
+            reply = f"All our items have been rated by guests! These ones have the fewest reviews: {names_list}. Would you like to try them and add your rating? 🌟"
+            return {"reply": reply, "items": lowest_rated_items}
+
+    # 4. INTENT: BEST / HIGHEST RATED
+    if any(k in msg_clean for k in ["best", "popular", "famous", "top", "highly rated", "star", "highest rating", "recommend"]):
+        sorted_popular = sorted(
+            [i for i in processed_items if i.get("availability_status") == "available"],
+            key=lambda x: (float(x.get("rating") or 0), x.get("rating_count", 0)),
+            reverse=True
+        )
+        top_items = sorted_popular[:4]
+        names_list = ", ".join([f"**{item['name']}** ({item['rating']} ★)" for item in top_items])
+        reply = f"🏆 Our guests' highest-rated favorites are: {names_list}! They are prepared fresh and highly recommended. Should I show you these options?"
+        return {"reply": reply, "items": top_items}
+
     # 1. GREETINGS & PERSONALIZATION
     if msg_clean in ["hi", "hello", "hey", "greetings", "good morning", "good evening", "yo", "hi kapi", "hello kapi"]:
         reply = "Hello there! 🛵 Kapi Adda AI here, your friendly food guide! I can share today's hot offers, check prices, details, and live reviews for anything on our menu. What are you craving today? ☕️"
