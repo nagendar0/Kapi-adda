@@ -39,11 +39,12 @@ const supabaseRest = async (table, query = 'select=*', options = {}) => {
     ...options,
     headers,
   });
+  const text = await res.text().catch(() => '');
   if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    throw new Error(detail || `Supabase ${table} request failed`);
+    throw new Error(text || `Supabase ${table} request failed`);
   }
-  return res.status === 204 ? null : res.json();
+  if (!text) return null;
+  return JSON.parse(text);
 };
 
 export async function POST(request) {
