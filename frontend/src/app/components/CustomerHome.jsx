@@ -813,10 +813,12 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
       Promise.all([
         fetch(`${SUPABASE_URL}/rest/v1/categories?select=*&t=${t}`, { headers: SUPABASE_HEADERS }),
         fetch(`${SUPABASE_URL}/rest/v1/menu_items?select=*&t=${t}`, { headers: SUPABASE_HEADERS }),
-        fetch(`${SUPABASE_URL}/rest/v1/reviews?select=menu_item_id,rating&t=${t}`, { headers: SUPABASE_HEADERS }),
+        fetch(`${SUPABASE_URL}/rest/v1/reviews?select=menu_item_id,rating&t=${t}`, { headers: SUPABASE_HEADERS })
+          .then((r) => r.ok ? r : { ok: true, json: () => Promise.resolve([]) })
+          .catch(() => ({ ok: true, json: () => Promise.resolve([]) })),
       ])
         .then(async ([categoriesResponse, itemsResponse, reviewsResponse]) => {
-          if (!categoriesResponse.ok || !itemsResponse.ok || !reviewsResponse.ok) throw new Error('Unable to load menu data');
+          if (!categoriesResponse.ok || !itemsResponse.ok) throw new Error('Unable to load menu data');
           const [categoryRows, itemRows, reviewRows] = await Promise.all([
             categoriesResponse.json(),
             itemsResponse.json(),
