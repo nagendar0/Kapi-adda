@@ -2283,7 +2283,6 @@ export default function OwnerDashboard({
                 { id: 'menu', label: 'Menu Catalog', icon: '🍽️' },
                 { id: 'analytics', label: 'AI Analytics', icon: '📈' },
                 { id: 'users', label: 'User Management', icon: '👥' },
-                { id: 'voice', label: 'AI Voice', icon: '🎙️' },
                 { id: 'offers', label: 'Daily Offers', icon: '🏷️' },
               ].map((tab) => {
                 const isActive = activeTab === tab.id;
