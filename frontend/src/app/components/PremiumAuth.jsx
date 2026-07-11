@@ -3,7 +3,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useBreakpoint, useScreenProfile } from '../utils/responsive';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined'
+  ? (['localhost', '127.0.0.1'].includes(window.location.hostname) ? 'http://127.0.0.1:8000' : '')
+  : 'http://127.0.0.1:8000');
 const HAS_BACKEND_API = true;
 
 const SUPABASE_URL = "https://kvjvnrktnkenlsaatmxq.supabase.co";
