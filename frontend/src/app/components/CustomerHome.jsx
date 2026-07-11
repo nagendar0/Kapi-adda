@@ -809,17 +809,11 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
   const loadMenu = (isPolling = false) => {
     if (!isPolling) setLoading(true);
     if (!HAS_BACKEND_API) {
-      const cacheBustHeaders = {
-        ...SUPABASE_HEADERS,
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0'
-      };
       const t = Date.now();
       Promise.all([
-        fetch(`${SUPABASE_URL}/rest/v1/categories?select=*&t=${t}`, { headers: cacheBustHeaders }),
-        fetch(`${SUPABASE_URL}/rest/v1/menu_items?select=*&t=${t}`, { headers: cacheBustHeaders }),
-        fetch(`${SUPABASE_URL}/rest/v1/reviews?select=menu_item_id,rating&t=${t}`, { headers: cacheBustHeaders }),
+        fetch(`${SUPABASE_URL}/rest/v1/categories?select=*&t=${t}`, { headers: SUPABASE_HEADERS }),
+        fetch(`${SUPABASE_URL}/rest/v1/menu_items?select=*&t=${t}`, { headers: SUPABASE_HEADERS }),
+        fetch(`${SUPABASE_URL}/rest/v1/reviews?select=menu_item_id,rating&t=${t}`, { headers: SUPABASE_HEADERS }),
       ])
         .then(async ([categoriesResponse, itemsResponse, reviewsResponse]) => {
           if (!categoriesResponse.ok || !itemsResponse.ok || !reviewsResponse.ok) throw new Error('Unable to load menu data');
