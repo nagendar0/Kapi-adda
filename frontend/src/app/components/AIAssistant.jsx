@@ -239,7 +239,7 @@ function renderTable(headers, rows, key) {
 }
 
 function renderMessageText(text) {
-  if (!text) return null;
+  if (!text || typeof text !== 'string') return null;
 
   const lines = text.split('\n');
   const elements = [];
@@ -971,13 +971,27 @@ export default function AIAssistant({
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed && Array.isArray(parsed) && parsed.length > 0) {
-          setTimeout(() => {
-            setMessages(parsed);
-            setHasGreeted(true);
-          }, 0);
+        if (parsed && Array.isArray(parsed)) {
+          const validMessages = parsed.filter(msg => 
+            msg && 
+            typeof msg === 'object' && 
+            (msg.role === 'bot' || msg.role === 'user') &&
+            (typeof msg.text === 'string' || typeof msg.message === 'string')
+          );
+          if (validMessages.length > 0) {
+            setTimeout(() => {
+              setMessages(validMessages);
+              setHasGreeted(true);
+            }, 0);
+          } else {
+            localStorage.removeItem('kapi_chat_history');
+          }
+        } else {
+          localStorage.removeItem('kapi_chat_history');
         }
-      } catch (e) {}
+      } catch (e) {
+        localStorage.removeItem('kapi_chat_history');
+      }
     }
   }, []);
 
@@ -1203,13 +1217,14 @@ export default function AIAssistant({
           </div>
 
           <div className="kapi-ai-scrollbar" style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 4px', minHeight: 0 }}>
-            {Array.isArray(messages) && messages.map((msg) =>
-              msg.role === 'bot' ? (
+            {Array.isArray(messages) && messages.map((msg) => {
+              if (!msg) return null;
+              return msg.role === 'bot' ? (
                 <BotMessage key={msg.id} msg={msg} onSelectProduct={onSelectProduct} onSelectOption={handleSelectOption} />
               ) : (
                 <UserMessage key={msg.id} msg={msg} />
-              )
-            )}
+              );
+            })}
             {isTyping && <TypingIndicator />}
             <div ref={messagesEndRef} />
           </div>
