@@ -117,7 +117,7 @@ export default function OwnerDashboard({
     availability_status: 'available',
     image_url: '',
     prep_time: '5',
-    rating: '4.5',
+    rating: '0',
     pieces: ''
   });
   const [offers, setOffers] = useState(() => getDefaultOffers());
@@ -375,12 +375,12 @@ export default function OwnerDashboard({
     const ratings = reviewsMap[item.id] || [];
     const avgRating = ratings.length
       ? ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length
-      : item.rating;
+      : 0;
     return {
       ...item,
       description: piecesInfo.description,
       pieces: item.pieces || piecesInfo.pieces,
-      rating: avgRating || item.rating || 4.5,
+      rating: avgRating,
     };
   };
 
@@ -724,6 +724,20 @@ export default function OwnerDashboard({
       fetchAdminUsers(true); // silent refresh - no loading spinner
     }, 5000);
     return () => clearInterval(interval);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'users') return undefined;
+    const refreshUsers = () => fetchAdminUsers(true);
+    const handleStorage = (event) => {
+      if (event.key === 'kapi_reviews_updated') refreshUsers();
+    };
+    window.addEventListener('kapi_reviews_updated', refreshUsers);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('kapi_reviews_updated', refreshUsers);
+      window.removeEventListener('storage', handleStorage);
+    };
   }, [activeTab]);
 
   // Keep the detail panel in sync: when adminUsers refreshes, update selectedUser to reflect new is_online status
@@ -1781,7 +1795,7 @@ export default function OwnerDashboard({
       category_id: menuForm.category_id,
       price: parseFloat(menuForm.price),
       availability_status: menuForm.availability_status,
-      rating: parseFloat(menuForm.rating || '4.5'),
+      rating: 0,
       prep_time: parseInt(menuForm.prep_time || '5'),
       pieces: menuForm.pieces || null
     };
@@ -1825,7 +1839,7 @@ export default function OwnerDashboard({
           availability_status: 'available',
           image_url: '',
           prep_time: '5',
-          rating: '4.5',
+          rating: '0',
           pieces: ''
         });
       } else {
@@ -1985,7 +1999,7 @@ export default function OwnerDashboard({
       price: parseFloat(item.price),
       availability_status: newStatus,
       image_url: item.image_url,
-      rating: parseFloat(item.rating || '4.5'),
+      rating: Number(item.rating) || 0,
       prep_time: parseInt(item.prep_time || '5')
     };
 
@@ -2430,7 +2444,7 @@ export default function OwnerDashboard({
                       availability_status: 'available',
                       image_url: '',
                       prep_time: '5',
-                      rating: '4.5',
+                      rating: '0',
                       pieces: ''
                     });
                     setShowAddMenuForm(true);
@@ -2954,7 +2968,7 @@ export default function OwnerDashboard({
                                     availability_status: item.availability_status || 'available',
                                     image_url: item.image_url || '',
                                     prep_time: (item.prep_time || '5').toString(),
-                                    rating: (item.rating || '4.5').toString(),
+                                    rating: String(item.rating ?? 0),
                                     pieces: item.pieces || ''
                                   });
                                   setShowAddMenuForm(true);

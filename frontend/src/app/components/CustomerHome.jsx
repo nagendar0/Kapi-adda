@@ -990,7 +990,17 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    (menuItems || []).map((i) => `${i.id}:${i.is_available}`).join(','),
+    (menuItems || []).map((item) => [
+      item.id,
+      item.name,
+      item.category,
+      item.description,
+      item.price,
+      item.image_url,
+      item.availability_status,
+      item.rating,
+      item.rating_count,
+    ].join(':')).join('|'),
     (user?.preferences || []).join(','),
   ]);
 

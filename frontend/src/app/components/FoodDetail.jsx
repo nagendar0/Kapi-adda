@@ -203,6 +203,9 @@ export default function FoodDetail({ item, user, onClose, onAddToCart, breakpoin
       setRating(0);
       setComment('');
       window.dispatchEvent(new Event('kapi_menu_updated'));
+      window.dispatchEvent(new Event('kapi_reviews_updated'));
+      localStorage.setItem('kapi_menu_updated', String(Date.now()));
+      localStorage.setItem('kapi_reviews_updated', String(Date.now()));
       // Refresh reviews
       const updated = await fetch(HAS_BACKEND_API ? `${API_BASE}/api/reviews/${item.id}` : `${SUPABASE_URL}/rest/v1/reviews?select=*,users(name)&menu_item_id=eq.${encodeURIComponent(item.id)}`, {
         headers: HAS_BACKEND_API ? undefined : SUPABASE_HEADERS,
@@ -228,8 +231,8 @@ export default function FoodDetail({ item, user, onClose, onAddToCart, breakpoin
   const imageUrl = getImageForItem(item);
   const isAvailable = item.is_available !== false && item.available !== false;
   const avgRating = reviews.length
-    ? (reviews.reduce((acc, r) => acc + (r.rating || 0), 0) / reviews.length).toFixed(1)
-    : null;
+    ? reviews.reduce((total, review) => total + Number(review.rating || 0), 0) / reviews.length
+    : 0;
 
   return (
     <>
@@ -418,18 +421,10 @@ export default function FoodDetail({ item, user, onClose, onAddToCart, breakpoin
                   {item.prep_time} min
                 </span>
               )}
-              {avgRating && (
-                <span style={{ fontSize: '13px', color: '#9ca3af', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                  <span style={{ color: '#f59e0b', fontSize: '15px' }}>★</span>
-                  {avgRating} ({reviews.length} review{reviews.length !== 1 ? 's' : ''})
-                </span>
-              )}
-              {(item.rating !== undefined && item.rating !== null) && !avgRating && (
-                <span style={{ fontSize: '13px', color: '#9ca3af', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                  <span style={{ color: '#f59e0b', fontSize: '15px' }}>★</span>
-                  {item.rating}
-                </span>
-              )}
+              <span style={{ fontSize: '13px', color: '#9ca3af', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <span style={{ color: reviews.length ? '#f59e0b' : '#4b5563', fontSize: '15px' }}>{reviews.length ? '★' : '☆'}</span>
+                {avgRating.toFixed(1)} ({reviews.length} review{reviews.length !== 1 ? 's' : ''})
+              </span>
             </div>
 
             {/* Description */}

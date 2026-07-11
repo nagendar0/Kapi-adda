@@ -822,6 +822,18 @@ export default function Home() {
     }
   }, [menu, selectedFoodItem]);
 
+  // Keep an open product detail in sync with live menu edits and new review totals.
+  useEffect(() => {
+    if (!selectedFoodItem || !menu.length) return;
+    const freshItem = menu
+      .flatMap((categoryGroup) => (categoryGroup.items || []).map((item) => ({
+        ...item,
+        category: categoryGroup.category,
+      })))
+      .find((item) => String(item.id) === String(selectedFoodItem.id));
+    if (freshItem) setSelectedFoodItem(freshItem);
+  }, [menu]);
+
   // Back/Forward Browser Buttons Support
   useEffect(() => {
     const handlePopState = () => {

@@ -167,21 +167,12 @@ export default function ProfileCard({ user, onUserUpdate, onSuccessRedirect, onL
       console.warn('Backend profile update failed, falling back to Supabase offline update:', err);
       try {
         const patchProfile = async (column, value) => {
-          const res = await fetch(`${SUPABASE_URL}/rest/v1/users?${column}=eq.${encodeURIComponent(value)}`, {
-            method: 'PATCH',
-            headers: {
-              'apikey': SUPABASE_ANON_KEY,
-              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-              'Content-Type': 'application/json',
-              'Prefer': 'return=representation'
-            },
-            body: JSON.stringify({ name: name.trim() })
-          });
-          if (!res.ok) {
-            const errData = await res.json().catch(() => ({}));
-            throw new Error(errData.message || 'Failed to update profile');
-          }
-          const data = await res.json();
+          const { data, error } = await supabase
+            .from('users')
+            .update({ name: name.trim() })
+            .eq(column, value)
+            .select();
+          if (error) throw new Error(error.message || 'Failed to update profile');
           return Array.isArray(data) ? data : [];
         };
 
