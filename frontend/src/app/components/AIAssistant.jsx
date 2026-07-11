@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, memo, useCallback, useMemo } from 'react';
 import { getImageForItem } from '../utils/imageMapper';
 import { useScreenProfile } from '../utils/responsive';
 
@@ -48,7 +48,7 @@ const INITIAL_MESSAGE = {
 
 /* ─────────────────── sub-components ─────────────────── */
 
-function RobotIcon() {
+const RobotIcon = memo(function RobotIcon() {
   return (
     <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
       {/* Headband / Headset arch */}
@@ -76,9 +76,9 @@ function RobotIcon() {
       <path d="M12 20C13.5 21 18.5 21 20 20" stroke="#f59e0b" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   );
-}
+});
 
-function TypingIndicator() {
+const TypingIndicator = memo(function TypingIndicator() {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, marginBottom: 12 }}>
       <BotAvatar />
@@ -109,9 +109,9 @@ function TypingIndicator() {
       </div>
     </div>
   );
-}
+});
 
-function BotAvatar() {
+const BotAvatar = memo(function BotAvatar() {
   return (
     <div
       style={{
@@ -130,12 +130,15 @@ function BotAvatar() {
       ☕
     </div>
   );
-}
+});
 
-function MiniItemCard({ item, onClick }) {
+const MiniItemCard = memo(function MiniItemCard({ item, onSelect }) {
+  const handleClick = () => {
+    onSelect?.(item);
+  };
   return (
     <div
-      onClick={onClick}
+      onClick={handleClick}
       style={{
         minWidth: 120,
         maxWidth: 120,
@@ -188,7 +191,7 @@ function MiniItemCard({ item, onClick }) {
       </div>
     </div>
   );
-}
+});
 
 const parseInlineMarkdown = (str) => {
   if (typeof str !== 'string') return str;
@@ -284,7 +287,7 @@ function renderMessageText(text) {
   return <>{elements}</>;
 }
 
-function BotMessage({ msg, onSelectProduct, onSelectOption }) {
+const BotMessage = memo(function BotMessage({ msg, onSelectProduct, onSelectOption }) {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, marginBottom: 14 }}>
       <BotAvatar />
@@ -346,7 +349,7 @@ function BotMessage({ msg, onSelectProduct, onSelectOption }) {
             }}
           >
             {msg.items.map((item, idx) => (
-              <MiniItemCard key={item.id ?? idx} item={item} onClick={() => onSelectProduct?.(item)} />
+              <MiniItemCard key={item.id ?? idx} item={item} onSelect={onSelectProduct} />
             ))}
           </div>
         )}
@@ -356,9 +359,9 @@ function BotMessage({ msg, onSelectProduct, onSelectOption }) {
       </div>
     </div>
   );
-}
+});
 
-function UserMessage({ msg }) {
+const UserMessage = memo(function UserMessage({ msg }) {
   return (
     <div
       style={{
@@ -388,7 +391,7 @@ function UserMessage({ msg }) {
       </div>
     </div>
   );
-}
+});
 
 /* ─────────────────── utils ─────────────────── */
 
@@ -738,230 +741,12 @@ export default function AIAssistant({
       sess = 'sess_' + Math.random().toString(36).substr(2, 9);
       localStorage.setItem('kapi_chat_session_id', sess);
     }
-    setChatSessionId(sess);
+    setTimeout(() => {
+      setChatSessionId(sess);
+    }, 0);
   }, []);
 
-  const getQuickReplies = () => {
-    if (activeMode === 'explorer') {
-      return [
-        "I want my usual",
-        "It's cold outside",
-        "Vegetarian options",
-        "Recommend a special"
-      ];
-    }
-    return [];
-  };
-
-  const handleModeChange = async (mode) => {
-    if (mode === activeMode) return;
-    setActiveMode(mode);
-    setIsTyping(true);
-    setPlannerStep(1);
-    localPlannerRef.current = { step: 1 };
-    
-    if (mode === 'planner') {
-      const initMsg = {
-        id: 'init_planner',
-        role: 'bot',
-        text: "Welcome to **Meal Planner Mode**! 📋 Let's build your perfect custom meal combination under budget. \n\n**Step 1 of 5**: What is your mood now?",
-        items: [],
-        options: ["😀 Happy", "😢 Sad", "😠 Angry", "😨 Scared", "😌 Calm", "😴 Tired", "😕 Confused", "🤩 Excited"],
-        timestamp: new Date(),
-      };
-      setMessages([initMsg]);
-      try {
-        if (!HAS_BACKEND_API) {
-          setIsTyping(false);
-          return;
-        }
-        await fetch(`${API_BASE}/api/ai/assistant`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: user?.id, session_id: chatSessionId, message: "plan mode", lang: selectedLang }),
-        });
-      } catch(e) {}
-      setIsTyping(false);
-    } else {
-      const initMsg = {
-        id: 'init_explorer',
-        role: 'bot',
-        text: "Namaste! ☕️ Switching back to **Explorer Mode** 🧭. I can help you find the perfect brew or snack. What can I get you today?",
-        items: [],
-        timestamp: new Date(),
-      };
-      setMessages([initMsg]);
-      try {
-        if (!HAS_BACKEND_API) {
-          setIsTyping(false);
-          return;
-        }
-        await fetch(`${API_BASE}/api/ai/assistant`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: user?.id, session_id: chatSessionId, message: "exit plan", lang: selectedLang }),
-        });
-      } catch(e) {}
-      setIsTyping(false);
-    }
-  };
-
-  const handleSelectOption = (optionText) => {
-    const cleanOpt = optionText.replace(/[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD00-\uDFFF]/g, '').trim().toLowerCase();
-    if (cleanOpt.includes("meal planner") || cleanOpt === "planner" || cleanOpt === "plan mode") {
-      handleModeChange('planner');
-    } else if (cleanOpt.includes("explore menu") || cleanOpt.includes("explorer mode") || cleanOpt === "explorer") {
-      handleModeChange('explorer');
-    } else {
-      sendMessage(optionText);
-    }
-  };
-
-  /* Chat Memory */
-  useEffect(() => {
-    const saved = localStorage.getItem('kapi_chat_history');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed && parsed.length > 0) {
-          setMessages(parsed);
-          setHasGreeted(true);
-        }
-      } catch (e) {}
-    }
-  }, []);
-
-  useEffect(() => {
-    if (messages.length > 1) {
-      localStorage.setItem('kapi_chat_history', JSON.stringify(messages));
-    }
-  }, [messages]);
-
-  /* Voice Input */
-  const startListening = () => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("Your browser does not support voice input.");
-      return;
-    }
-    const recognition = new SpeechRecognition();
-    window._assistantRecognition = recognition;
-    recognition.lang = selectedLang === 'hi' ? 'hi-IN' : (selectedLang === 'te' ? 'te-IN' : 'en-US');
-    recognition.interimResults = false;
-    recognition.continuous = false;
-    
-    let finalTranscript = '';
-    
-    recognition.onstart = () => {
-      setIsListening(true);
-      setInput('🎙️ Listening...');
-    };
-    
-    recognition.onresult = (event) => {
-      const currentTranscript = event.results[0][0].transcript;
-      finalTranscript = currentTranscript;
-      setInput(currentTranscript);
-    };
-
-    recognition.onerror = (event) => {
-      setIsListening(false);
-      setInput('');
-
-      if (event.error === 'no-speech' || event.error === 'aborted') {
-        return;
-      }
-
-      console.error("Speech recognition error:", event.error);
-      if (event.error === 'not-allowed') {
-        alert("Microphone access blocked! Please click the lock icon in your URL bar and allow microphone permissions.");
-      } else {
-        alert(`Voice error: ${event.error}. Please try again using Chrome or Edge browser.`);
-      }
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-      window._assistantRecognition = null;
-      if (finalTranscript.trim()) {
-        sendMessage(finalTranscript, true);
-      } else {
-        setInput('');
-      }
-    };
-
-    try {
-      recognition.start();
-    } catch (err) {
-      console.error("Recognition start error:", err);
-      setIsListening(false);
-      setInput('');
-    }
-  };
-
-  const toggleListening = () => {
-    if (isListening) {
-      if (window._assistantRecognition) {
-        try { window._assistantRecognition.abort(); } catch(e){}
-      }
-      setIsListening(false);
-      setInput('');
-    } else {
-      startListening();
-    }
-  };
-
-  /* Auto start voice when requested */
-  useEffect(() => {
-    if (isOpen && startWithVoice) {
-      const timer = setTimeout(() => {
-        startListening();
-        if (onResetStartWithVoice) onResetStartWithVoice();
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [isOpen, startWithVoice]);
-
-  /* reset greeting on each open */
-  useEffect(() => {
-    if (isOpen && !hasGreeted) {
-      setMessages([{
-        id: 'init',
-        role: 'bot',
-        text: GREETINGS[selectedLang] || GREETINGS['en'],
-        items: [],
-        timestamp: new Date()
-      }]);
-      setHasGreeted(true);
-    }
-    if (!isOpen) setHasGreeted(false);
-  }, [isOpen, hasGreeted, selectedLang]);
-
-  /* Update initial message dynamically if language is switched mid-session and no chats have occurred */
-  useEffect(() => {
-    if (messages.length === 1 && messages[0].id === 'init') {
-      setMessages([{
-        id: 'init',
-        role: 'bot',
-        text: GREETINGS[selectedLang] || GREETINGS['en'],
-        items: [],
-        timestamp: messages[0].timestamp
-      }]);
-    }
-  }, [selectedLang]);
-
-  /* scroll to bottom on new message */
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isTyping]);
-
-  /* focus input when panel opens */
-  useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 350);
-    }
-  }, [isOpen]);
-
-  async function sendMessage(text, isVoice = false) {
+  const sendMessage = useCallback(async (text, isVoice = false) => {
     if (!text.trim()) return;
     
     // Clean emojis & suffix helpers (e.g. "Veg 🌿" -> "Veg", "100 💰" -> "100")
@@ -999,11 +784,7 @@ export default function AIAssistant({
     }
 
     if (activeMode === 'planner') {
-      if (plannerStep === 1) setPlannerStep(2);
-      else if (plannerStep === 2) setPlannerStep(3);
-      else if (plannerStep === 3) setPlannerStep(4);
-      else if (plannerStep === 4) setPlannerStep(5);
-      else if (plannerStep === 5) setPlannerStep(1);
+      setPlannerStep((prev) => (prev % 5) + 1);
     }
 
     /* fire analytics in background */
@@ -1098,66 +879,240 @@ export default function AIAssistant({
         ]);
       }, 1000);
     }
-  }
+  }, [user, menuItems, activeMode, chatSessionId, selectedLang]);
 
-  function handleKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage(input);
+  const handleModeChange = useCallback(async (mode) => {
+    if (mode === activeMode) return;
+    setActiveMode(mode);
+    setIsTyping(true);
+    setPlannerStep(1);
+    localPlannerRef.current = { step: 1 };
+    
+    if (mode === 'planner') {
+      const initMsg = {
+        id: 'init_planner',
+        role: 'bot',
+        text: "Welcome to **Meal Planner Mode**! 📋 Let's build your perfect custom meal combination under budget. \n\n**Step 1 of 5**: What is your mood now?",
+        items: [],
+        options: ["😀 Happy", "😢 Sad", "😠 Angry", "😨 Scared", "😌 Calm", "😴 Tired", "😕 Confused", "🤩 Excited"],
+        timestamp: new Date(),
+      };
+      setMessages([initMsg]);
+      try {
+        if (!HAS_BACKEND_API) {
+          setIsTyping(false);
+          return;
+        }
+        await fetch(`${API_BASE}/api/ai/assistant`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: user?.id, session_id: chatSessionId, message: "plan mode", lang: selectedLang }),
+        });
+      } catch(e) {}
+      setIsTyping(false);
+    } else {
+      const initMsg = {
+        id: 'init_explorer',
+        role: 'bot',
+        text: "Namaste! ☕️ Switching back to **Explorer Mode** 🧭. I can help you find the perfect brew or snack. What can I get you today?",
+        items: [],
+        timestamp: new Date(),
+      };
+      setMessages([initMsg]);
+      try {
+        if (!HAS_BACKEND_API) {
+          setIsTyping(false);
+          return;
+        }
+        await fetch(`${API_BASE}/api/ai/assistant`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: user?.id, session_id: chatSessionId, message: "exit plan", lang: selectedLang }),
+        });
+      } catch(e) {}
+      setIsTyping(false);
     }
-  }
+  }, [activeMode, user, chatSessionId, selectedLang]);
+
+  const handleSelectOption = useCallback((optionText) => {
+    const cleanOpt = optionText.replace(/[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD00-\uDFFF]/g, '').trim().toLowerCase();
+    if (cleanOpt.includes("meal planner") || cleanOpt === "planner" || cleanOpt === "plan mode") {
+      handleModeChange('planner');
+    } else if (cleanOpt.includes("explore menu") || cleanOpt.includes("explorer mode") || cleanOpt === "explorer") {
+      handleModeChange('explorer');
+    } else {
+      sendMessage(optionText);
+    }
+  }, [handleModeChange, sendMessage]);
+
+  const getQuickReplies = useCallback(() => {
+    if (activeMode === 'explorer') {
+      return [
+        "I want my usual",
+        "It's cold outside",
+        "Vegetarian options",
+        "Recommend a special"
+      ];
+    }
+    return [];
+  }, [activeMode]);
+
+  /* Chat Memory */
+  useEffect(() => {
+    const saved = localStorage.getItem('kapi_chat_history');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.length > 0) {
+          setTimeout(() => {
+            setMessages(parsed);
+            setHasGreeted(true);
+          }, 0);
+        }
+      } catch (e) {}
+    }
+  }, []);
+
+  useEffect(() => {
+    if (messages.length > 1) {
+      localStorage.setItem('kapi_chat_history', JSON.stringify(messages));
+    }
+  }, [messages]);
+
+  /* Voice Input */
+  const startListening = useCallback(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Your browser does not support voice input.");
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    window._assistantRecognition = recognition;
+    recognition.lang = selectedLang === 'hi' ? 'hi-IN' : (selectedLang === 'te' ? 'te-IN' : 'en-US');
+    recognition.interimResults = false;
+    recognition.continuous = false;
+    
+    let finalTranscript = '';
+    
+    recognition.onstart = () => {
+      setIsListening(true);
+      setInput('🎙️ Listening...');
+    };
+    
+    recognition.onresult = (event) => {
+      const currentTranscript = event.results[0][0].transcript;
+      finalTranscript = currentTranscript;
+      setInput(currentTranscript);
+    };
+
+    recognition.onerror = (event) => {
+      setIsListening(false);
+      setInput('');
+
+      if (event.error === 'no-speech' || event.error === 'aborted') {
+        return;
+      }
+
+      console.error("Speech recognition error:", event.error);
+      if (event.error === 'not-allowed') {
+        alert("Microphone access blocked! Please click the lock icon in your URL bar and allow microphone permissions.");
+      } else {
+        alert(`Voice error: ${event.error}. Please try again using Chrome or Edge browser.`);
+      }
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      window._assistantRecognition = null;
+      if (finalTranscript.trim()) {
+        sendMessage(finalTranscript, true);
+      } else {
+        setInput('');
+      }
+    };
+
+    try {
+      recognition.start();
+    } catch (err) {
+      console.error("Recognition start error:", err);
+      setIsListening(false);
+      setInput('');
+    }
+  }, [selectedLang, sendMessage]);
+
+  const toggleListening = useCallback(() => {
+    if (isListening) {
+      if (window._assistantRecognition) {
+        try { window._assistantRecognition.abort(); } catch(e){}
+      }
+      setIsListening(false);
+      setInput('');
+    } else {
+      startListening();
+    }
+  }, [isListening, startListening]);
+
+  /* Auto start voice when requested */
+  useEffect(() => {
+    if (isOpen && startWithVoice) {
+      const timer = setTimeout(() => {
+        startListening();
+        if (onResetStartWithVoice) onResetStartWithVoice();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, startWithVoice, startListening, onResetStartWithVoice]);
+
+  /* reset greeting on each open */
+  useEffect(() => {
+    if (isOpen && !hasGreeted) {
+      setTimeout(() => {
+        setMessages([{
+          id: 'init',
+          role: 'bot',
+          text: GREETINGS[selectedLang] || GREETINGS['en'],
+          items: [],
+          timestamp: new Date()
+        }]);
+        setHasGreeted(true);
+      }, 0);
+    }
+    if (!isOpen) {
+      setTimeout(() => {
+        setHasGreeted(false);
+      }, 0);
+    }
+  }, [isOpen, hasGreeted, selectedLang]);
+
+  /* Update initial message dynamically if language is switched mid-session and no chats have occurred */
+  useEffect(() => {
+    if (messages.length === 1 && messages[0].id === 'init' && messages[0].text !== (GREETINGS[selectedLang] || GREETINGS['en'])) {
+      setTimeout(() => {
+        setMessages([{
+          id: 'init',
+          role: 'bot',
+          text: GREETINGS[selectedLang] || GREETINGS['en'],
+          items: [],
+          timestamp: messages[0].timestamp
+        }]);
+      }, 0);
+    }
+  }, [selectedLang, messages]);
+
+  /* scroll to bottom on new message */
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isTyping]);
+
+  /* focus input when panel opens */
+  useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => inputRef.current?.focus(), 350);
+    }
+  }, [isOpen]);
 
   return (
     <>
-      {/* keyframe injection */}
-      <style>{`
-        @keyframes kapiSlideUp {
-          from { opacity: 0; transform: translateY(30px) scale(0.97); }
-          to   { opacity: 1; transform: translateY(0)   scale(1);    }
-        }
-        @keyframes kapiDot {
-          0%, 60%, 100% { transform: translateY(0);    opacity: 0.4; }
-          30%           { transform: translateY(-8px); opacity: 1;   }
-        }
-        @keyframes kapiFloat {
-          0%, 100% { transform: translateY(0); }
-          50%      { transform: translateY(-6px); }
-        }
-        @keyframes kapiGlow {
-          0%, 100% { box-shadow: 0 0 0 0px rgba(245, 158, 11, 0.4), 0 4px 20px rgba(0,0,0,0.5); }
-          50%      { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0), 0 4px 25px rgba(245, 158, 11, 0.3); }
-        }
-        @keyframes kapiTooltip {
-          from { opacity: 0; transform: translateX(10px) scale(0.9); }
-          to   { opacity: 0.95; transform: translateX(0)   scale(1);   }
-        }
-        @keyframes kapiPulse {
-          0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-          70% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
-          100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-        }
-        .kapi-ai-scrollbar::-webkit-scrollbar { width: 4px; }
-        .kapi-ai-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .kapi-ai-scrollbar::-webkit-scrollbar-thumb { background: rgba(245,158,11,0.3); border-radius: 4px; }
-        .kapi-ai-input::placeholder { color: rgba(148,163,184,0.5); }
-        .kapi-chip:hover { background: rgba(245,158,11,0.2) !important; border-color: rgba(245,158,11,0.5) !important; }
-        .kapi-send:hover { background: linear-gradient(135deg,#fbbf24,#d97706) !important; transform: scale(1.08); }
-        .kapi-close:hover { background: rgba(255,255,255,0.12) !important; }
-        .kapi-float-btn {
-          border: 2px solid rgba(245,158,11,0.4) !important;
-          background: linear-gradient(135deg, #1e1b18 0%, #0a0702 100%) !important;
-        }
-        .kapi-float-btn:hover {
-          transform: scale(1.08);
-          border-color: rgba(245,158,11,0.8) !important;
-          background: linear-gradient(135deg, #2a2520 0%, #0f0b08 100%) !important;
-        }
-        .kapi-float-btn:hover + .kapi-tooltip {
-          opacity: 1 !important;
-          transform: translateX(0) scale(1.03) !important;
-        }
-      `}</style>
-
       {/* panel */}
       {isOpen && (
         <div

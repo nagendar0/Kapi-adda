@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
 import PremiumAuth from "./components/PremiumAuth";
 import CustomerHome from "./components/CustomerHome";
@@ -1229,12 +1229,14 @@ export default function Home() {
     setOnboardForm({ ...onboardForm, favorite_categories: current });
   };
 
-  const flatMenuItems = Array.isArray(menu) ? menu.flatMap(catGroup => 
-    (catGroup.items || []).map(item => ({
-      ...item,
-      category: catGroup.category
-    }))
-  ) : [];
+  const flatMenuItems = useMemo(() => {
+    return Array.isArray(menu) ? menu.flatMap(catGroup => 
+      (catGroup.items || []).map(item => ({
+        ...item,
+        category: catGroup.category
+      }))
+    ) : [];
+  }, [menu]);
 
   if (!mounted) {
     return (

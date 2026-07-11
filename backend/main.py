@@ -276,7 +276,7 @@ def preprocess_item(item: dict, reviews_map: Optional[dict] = None) -> dict:
             item["rating"] = round(sum(ratings) / len(ratings), 1)
             item["rating_count"] = len(ratings)
         else:
-            item["rating"] = 0.0
+            item["rating"] = float(item.get("rating") or 0.0)
             item["rating_count"] = 0
     else:
         # Fetch reviews directly for this item
@@ -287,7 +287,7 @@ def preprocess_item(item: dict, reviews_map: Optional[dict] = None) -> dict:
                 item["rating"] = round(sum(ratings) / len(ratings), 1)
                 item["rating_count"] = len(ratings)
             else:
-                item["rating"] = 0.0
+                item["rating"] = float(item.get("rating") or 0.0)
                 item["rating_count"] = 0
         except Exception as e:
             print("Error loading reviews for item:", e)
@@ -2105,16 +2105,34 @@ def _chat_assistant_logic(msg: str, user_id: Optional[str], session_id: Optional
     except Exception:
         pass
 
+    # Fetch all reviews to extract comments and map them by item ID
+    reviews_by_item = {}
+    try:
+        all_reviews = db.request("GET", "reviews") or []
+        for r in all_reviews:
+            item_id = r.get("menu_item_id")
+            comment = r.get("review_text") or r.get("comment") or ""
+            if item_id and comment.strip():
+                if item_id not in reviews_by_item:
+                    reviews_by_item[item_id] = []
+                reviews_by_item[item_id].append(comment.strip())
+    except Exception as e:
+        print("Error fetching all reviews for LLM context:", e)
+
     # Simplify menu details to send to the LLM (if used)
     simplified_menu = []
     for item in processed_items:
+        item_id = item.get("id")
+        comments_list = reviews_by_item.get(item_id, [])
         simplified_menu.append({
             "name": item.get("name"),
             "price": item.get("price"),
             "category": item.get("category"),
-            "rating": item.get("rating", 0),
+            "rating": item.get("rating", 0.0),
+            "rating_count": item.get("rating_count", 0),
             "availability": item.get("availability_status", "available"),
-            "description": item.get("description", "")
+            "description": item.get("description", ""),
+            "recent_reviews": comments_list[:3] # Send top 3 customer reviews
         })
 
     llm_response_text = None
@@ -2126,8 +2144,14 @@ Active Offer: {today_offer_details}
 Menu Items: {json.dumps(simplified_menu)}
 User Query: "{msg_clean}"
 Instructions:
-- Respond in a warm, polite, and helpful tone.
-- Answer the query accurately using the menu context.
+- Analyze the User Query carefully to understand the user's intent. Answer directly and precisely according to the user's question.
+- Respond in a warm, polite, and helpful tone. Use emojis! ☕🥐
+- You have access to real-time LIVE data:
+  1. If asked about the highest-rated product or best/popular items, check the "rating" and "rating_count" in the Menu Items and suggest the top available items, mentioning their ratings.
+  2. If asked about customer comments/reviews, check "recent_reviews" for the matching item and quote or summarize them. If the item is in stock (available) but has no reviews or rating is 0, say: "Try it! It is very delicious, and you can be the first to write a review for it!" alongside its price. If the item is out of stock, do not ask the user to try it or review it; state clearly that it is out of stock today.
+  3. If asked about today's offers/deals/discounts, explain the Active Offer details and suggest matching available products.
+  4. Only recommend items that are marked as available: "availability": "available". If a requested item is out of stock ("availability": "out_of_stock"), politely inform the user and suggest similar available options from the same category.
+- CRITICAL: Never give incorrect information. Never hallucinate products, prices, ratings, or comments that are not present in the Menu Items context. If the user asks about an item that does not exist in our menu, politely state that Kapi Adda does not offer it, and recommend our available specials instead.
 - Output your answer in valid JSON format ONLY:
 {{
   "reply": "Your response text here. Use emojis! ☕🥐",
@@ -2157,7 +2181,14 @@ Active Offer: {today_offer_details}
 Menu Items: {json.dumps(simplified_menu)}
 User Query: "{msg_clean}"
 Instructions:
-- Respond in a warm, polite, and helpful tone. Use emojis!
+- Analyze the User Query carefully to understand the user's intent. Answer directly and precisely according to the user's question.
+- Respond in a warm, polite, and helpful tone. Use emojis! ☕🥐
+- You have access to real-time LIVE data:
+  1. If asked about the highest-rated product or best/popular items, check the "rating" and "rating_count" in the Menu Items and suggest the top available items, mentioning their ratings.
+  2. If asked about customer comments/reviews, check "recent_reviews" for the matching item and quote or summarize them. If the item is in stock (available) but has no reviews or rating is 0, say: "Try it! It is very delicious, and you can be the first to write a review for it!" alongside its price. If the item is out of stock, do not ask the user to try it or review it; state clearly that it is out of stock today.
+  3. If asked about today's offers/deals/discounts, explain the Active Offer details and suggest matching available products.
+  4. Only recommend items that are marked as available: "availability": "available". If a requested item is out of stock ("availability": "out_of_stock"), politely inform the user and suggest similar available options from the same category.
+- CRITICAL: Never give incorrect information. Never hallucinate products, prices, ratings, or comments that are not present in the Menu Items context. If the user asks about an item that does not exist in our menu, politely state that Kapi Adda does not offer it, and recommend our available specials instead.
 - Output in JSON format ONLY:
 {{
   "reply": "Conversational response",
@@ -2218,6 +2249,42 @@ Instructions:
     # STATE-OF-THE-ART LOCAL RULE-BASED NLP CHAT ENGINE (NO EXTERNAL LLM KEYS)
     # -------------------------------------------------------------------------
     
+    # 0.5. INTENT: DETECT INQUIRIES FOR ITEMS NOT ON THE MENU (PREVENT WRONG ANSWERS)
+    food_inquiry_match = False
+    inquired_item_name = None
+    
+    # Check common food keywords not served here
+    common_non_menu_foods = ["pizza", "burger", "sushi", "pasta", "biryani", "roti", "curry", "rice", "noodles", "donut", "taco", "sandwich", "waffle", "beer", "wine", "alcohol", "chicken roll", "paneer butter masala", "naan", "soup"]
+    for food in common_non_menu_foods:
+        if food in msg_clean:
+            item_exists = any(food in item["name"].lower() or item["name"].lower() in food for item in processed_items)
+            if not item_exists:
+                inquired_item_name = food
+                food_inquiry_match = True
+                break
+                
+    if not food_inquiry_match:
+        # Check patterns like "do you have X", "order X", etc.
+        for pattern in [r"do you have\s+([a-zA-Z\s]+)", r"do you serve\s+([a-zA-Z\s]+)", r"can I get\s+([a-zA-Z\s]+)", r"want\s+([a-zA-Z\s]+)", r"order\s+([a-zA-Z\s]+)", r"buy\s+([a-zA-Z\s]+)", r"is\s+([a-zA-Z\s]+)\s+available"]:
+            m = re.search(pattern, msg_clean)
+            if m:
+                candidate = m.group(1).strip()
+                # Clean candidate
+                candidate_cleaned = re.sub(r"\b(a|the|some|today|now|please|here|for me)\b", "", candidate).strip()
+                if candidate_cleaned and len(candidate_cleaned) > 2:
+                    item_exists = any(candidate_cleaned in item["name"].lower() or item["name"].lower() in candidate_cleaned for item in processed_items)
+                    if not item_exists:
+                        inquired_item_name = candidate_cleaned
+                        food_inquiry_match = True
+                        break
+
+    if food_inquiry_match and inquired_item_name:
+        reply = f"We don't serve **{inquired_item_name.title()}** at Kapi Adda right now. 😔 However, we have a wonderful selection of freshly prepared hot snacks, premium milkshakes, and delicious desserts! Here are a few of our highest-rated available items you might love instead:"
+        return {
+            "reply": reply,
+            "items": [i for i in processed_items if i.get("availability_status") == "available" and i.get("rating", 0) >= 4.0][:3]
+        }
+
     # 1. Helper to find in-stock recommendations
     def get_top_available_items(limit=3):
         available_items = [i for i in processed_items if i.get("availability_status") == "available"]
@@ -2241,11 +2308,11 @@ Instructions:
             rating_val = matched_product.get("rating", 0.0)
             rating_count = matched_product.get("rating_count", 0)
 
-            # If no reviews / unrated (Fulfill: "if the not rating, no review try it first")
+            # If no reviews / unrated
             if rating_count == 0 or rating_val == 0:
                 reply = (
-                    f"Our delicious **{matched_product['name']}**{pieces_str} doesn't have any reviews or ratings yet since it's fresh off our kitchen! 👨‍🍳\n\n"
-                    f"Would you like to **try it first** and be the very first customer to write a review? We guarantee it is absolutely wonderful and priced at just **₹{matched_product['price']:.0f}**! 🌟"
+                    f"Our **{matched_product['name']}**{pieces_str} doesn't have any reviews or ratings yet. "
+                    f"Try it! It is very delicious, and you can be the first to write a review for it! 🌟 It is available for order at **₹{matched_product['price']:.0f}**."
                 )
                 return {"reply": reply, "items": [matched_product]}
             
@@ -2327,10 +2394,25 @@ Instructions:
             key=lambda x: (float(x.get("rating") or 0), x.get("rating_count", 0)),
             reverse=True
         )
-        top_items = sorted_popular[:4]
-        names_list = ", ".join([f"**{item['name']}** ({item['rating']} ★)" for item in top_items])
-        reply = f"🏆 Our guests' highest-rated favorites are: {names_list}! They are prepared fresh and highly recommended. Should I show you these options?"
-        return {"reply": reply, "items": top_items}
+        if sorted_popular:
+            top_items = sorted_popular[:4]
+            names_list = ", ".join([f"**{item['name']}** ({item['rating']} ★)" for item in top_items])
+            top_item = top_items[0]
+            
+            # Fetch reviews for the top item
+            reviews_list = []
+            try:
+                reviews_res = db.request("GET", "reviews", params={"menu_item_id": f"eq.{top_item['id']}"})
+                reviews_list = [r.get("review_text") or r.get("comment") or "" for r in reviews_res if r.get("review_text") or r.get("comment")]
+            except Exception:
+                pass
+                
+            reply = f"🏆 Our guests' highest-rated favorites are: {names_list}! They are prepared fresh and highly recommended.\n\n"
+            reply += f"Our top available choice is **{top_item['name']}** (priced at ₹{top_item['price']:.0f}) with a rating of **{top_item['rating']} ★**."
+            if reviews_list:
+                selected_comment = random.choice(reviews_list)
+                reply += f" Here is what our customers say: *\"{selected_comment}\"* ❤️"
+            return {"reply": reply, "items": top_items}
 
     # 1. GREETINGS & PERSONALIZATION
     if msg_clean in ["hi", "hello", "hey", "greetings", "good morning", "good evening", "yo", "hi kapi", "hello kapi"]:
@@ -2487,7 +2569,7 @@ Instructions:
                 snippet = random.choice(reviews)
                 reply += f"\n\nHere is what our customers say: *\"{snippet}\"* 🌟"
         else:
-            reply += "\n\nThis delicious treat hasn't received any customer ratings yet since it's fresh off our kitchen! 👨‍🍳 How about being the very first to try it and write a review? We guarantee it is absolutely delicious! 🌟"
+            reply += "\n\nTry it! It is very delicious, and you can be the first to write a review for it! 🌟"
 
         reply += "\n\nWould you like to add it to your order?"
             
