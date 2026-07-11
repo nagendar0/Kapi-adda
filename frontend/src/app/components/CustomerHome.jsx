@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { getImageForItem } from '../utils/imageMapper';
 import { useBreakpoint, useScreenProfile } from '../utils/responsive';
 import { fetchSharedOffers, getDefaultOffers, isOfferConfigCategory } from '../utils/sharedOffers';
@@ -959,23 +959,40 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
     .sort((a, b) => (b.rating || b.average_rating || 0) - (a.rating || a.average_rating || 0))
     .slice(0, 8);
 
-  const availableItems = menuItems.filter((i) => i.is_available !== false);
-  const shuffled1 = shuffleArray(availableItems);
-  const popularItems = shuffled1.slice(0, 6);
-  const shuffled2 = shuffleArray(availableItems.filter((i) => !popularItems.includes(i)));
-  const trendingItems = shuffled2.slice(0, 6);
+  const { popularItems, trendingItems, recommendedItems } = useMemo(() => {
+    const available = menuItems.filter((i) => i.is_available !== false);
+    const shuffled1 = shuffleArray(available);
+    const popular = shuffled1.slice(0, 6);
+    
+    const remaining = available.filter((i) => !popular.some((p) => p.id === i.id));
+    const shuffled2 = shuffleArray(remaining);
+    const trending = shuffled2.slice(0, 6);
 
-  const recommendedItems = (() => {
     const prefs = user?.preferences || [];
+    let recommended = [];
     if (prefs.length > 0) {
-      const matched = menuItems.filter((i) =>
+      const matched = available.filter((i) =>
         prefs.some((p) => (i.category || '').toLowerCase().includes(p.toLowerCase()) ||
           (i.name || '').toLowerCase().includes(p.toLowerCase()))
       );
-      if (matched.length > 0) return matched.slice(0, 8);
+      if (matched.length > 0) {
+        recommended = matched.slice(0, 8);
+      }
     }
-    return shuffleArray(availableItems).slice(0, 6);
-  })();
+    if (recommended.length === 0) {
+      recommended = shuffleArray(available).slice(0, 6);
+    }
+
+    return {
+      popularItems: popular,
+      trendingItems: trending,
+      recommendedItems: recommended,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    (menuItems || []).map((i) => `${i.id}:${i.is_available}`).join(','),
+    (user?.preferences || []).join(','),
+  ]);
 
   // ── Render ──
   return (
