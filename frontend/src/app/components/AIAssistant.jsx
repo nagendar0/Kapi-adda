@@ -396,9 +396,14 @@ const UserMessage = memo(function UserMessage({ msg }) {
 /* ─────────────────── utils ─────────────────── */
 
 function formatTime(ts) {
-  if (!ts) return '';
-  const d = ts instanceof Date ? ts : new Date(ts);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (!ts || ts === 'undefined' || ts === 'null') return '';
+  try {
+    const d = ts instanceof Date ? ts : new Date(ts);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch (e) {
+    return '';
+  }
 }
 
 const asFlatMenu = (source) => (Array.isArray(source) ? source : []).flatMap((entry) => {
@@ -963,7 +968,7 @@ export default function AIAssistant({
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed && parsed.length > 0) {
+        if (parsed && Array.isArray(parsed) && parsed.length > 0) {
           setTimeout(() => {
             setMessages(parsed);
             setHasGreeted(true);
@@ -1195,7 +1200,7 @@ export default function AIAssistant({
           </div>
 
           <div className="kapi-ai-scrollbar" style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 4px', minHeight: 0 }}>
-            {messages.map((msg) =>
+            {Array.isArray(messages) && messages.map((msg) =>
               msg.role === 'bot' ? (
                 <BotMessage key={msg.id} msg={msg} onSelectProduct={onSelectProduct} onSelectOption={handleSelectOption} />
               ) : (
