@@ -968,11 +968,18 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
     const shuffled2 = shuffleArray(remaining);
     const trending = shuffled2.slice(0, 6);
 
-    const prefs = user?.preferences || [];
+    const favCategories = Array.isArray(user?.preferences?.favorite_categories)
+      ? user.preferences.favorite_categories
+      : [];
+    const dietaryPrefs = Array.isArray(user?.preferences?.dietary_preferences)
+      ? user.preferences.dietary_preferences
+      : [];
+    const prefsList = [...favCategories, ...dietaryPrefs];
+
     let recommended = [];
-    if (prefs.length > 0) {
+    if (prefsList.length > 0) {
       const matched = available.filter((i) =>
-        prefs.some((p) => (i.category || '').toLowerCase().includes(p.toLowerCase()) ||
+        prefsList.some((p) => (i.category || '').toLowerCase().includes(p.toLowerCase()) ||
           (i.name || '').toLowerCase().includes(p.toLowerCase()))
       );
       if (matched.length > 0) {
@@ -1001,7 +1008,10 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
       item.rating,
       item.rating_count,
     ].join(':')).join('|'),
-    (user?.preferences || []).join(','),
+    [
+      ...(Array.isArray(user?.preferences?.favorite_categories) ? user.preferences.favorite_categories : []),
+      ...(Array.isArray(user?.preferences?.dietary_preferences) ? user.preferences.dietary_preferences : [])
+    ].join(','),
   ]);
 
   // ── Render ──
