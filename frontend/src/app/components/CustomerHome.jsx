@@ -810,11 +810,10 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
     if (!isPolling) setLoading(true);
 
     const loadMenuFromSupabase = () => {
-      const t = Date.now();
       Promise.all([
-        fetch(`${SUPABASE_URL}/rest/v1/categories?select=*&t=${t}`, { headers: SUPABASE_HEADERS }),
-        fetch(`${SUPABASE_URL}/rest/v1/menu_items?select=*&t=${t}`, { headers: SUPABASE_HEADERS }),
-        fetch(`${SUPABASE_URL}/rest/v1/reviews?select=menu_item_id,rating&t=${t}`, { headers: SUPABASE_HEADERS })
+        fetch(`${SUPABASE_URL}/rest/v1/categories?select=*`, { headers: SUPABASE_HEADERS, cache: 'no-store' }),
+        fetch(`${SUPABASE_URL}/rest/v1/menu_items?select=*`, { headers: SUPABASE_HEADERS, cache: 'no-store' }),
+        fetch(`${SUPABASE_URL}/rest/v1/reviews?select=menu_item_id,rating`, { headers: SUPABASE_HEADERS, cache: 'no-store' })
           .then((r) => r.ok ? r : { ok: true, json: () => Promise.resolve([]) })
           .catch(() => ({ ok: true, json: () => Promise.resolve([]) })),
       ])
