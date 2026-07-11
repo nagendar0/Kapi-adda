@@ -1133,6 +1133,13 @@ export default function AIAssistant({
     }
   }, [isOpen]);
 
+  const handleKeyDown = useCallback((e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage(input);
+    }
+  }, [input, sendMessage]);
+
   return (
     <>
       {/* panel */}
