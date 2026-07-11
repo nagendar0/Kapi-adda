@@ -863,10 +863,7 @@ export default function PremiumAuth({
           return;
         }
         setForgotSuccess('Verification code sent successfully! (Code: 123456)');
-        setTimeout(() => {
-          setForgotStep('verify-otp');
-          setForgotSuccess('');
-        }, 1500);
+        setForgotStep('verify-otp');
         return;
       }
       const res = await fetch(`${API_BASE}/api/auth/request-otp`, {
@@ -879,10 +876,7 @@ export default function PremiumAuth({
         setForgotError(data?.detail || data?.message || 'Failed to request verification code.');
       } else {
         setForgotSuccess('Verification code sent successfully!');
-        setTimeout(() => {
-          setForgotStep('verify-otp');
-          setForgotSuccess('');
-        }, 1500);
+        setForgotStep('verify-otp');
       }
     } catch (err) {
       setForgotError(err.message || 'Unable to connect. Please check your connection.');
@@ -911,10 +905,7 @@ export default function PremiumAuth({
           return;
         }
         setForgotSuccess('Code verified successfully!');
-        setTimeout(() => {
-          setForgotStep('set-password');
-          setForgotSuccess('');
-        }, 1500);
+        setForgotStep('set-password');
         return;
       }
       const res = await fetch(`${API_BASE}/api/auth/verify-otp`, {
@@ -927,10 +918,7 @@ export default function PremiumAuth({
         setForgotError(data?.detail || data?.message || 'Invalid or expired verification code.');
       } else {
         setForgotSuccess('Code verified successfully!');
-        setTimeout(() => {
-          setForgotStep('set-password');
-          setForgotSuccess('');
-        }, 1500);
+        setForgotStep('set-password');
       }
     } catch (err) {
       setForgotError(err.message || 'Unable to connect. Please check your connection.');
