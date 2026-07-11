@@ -868,18 +868,8 @@ export default function PremiumAuth({
       setForgotSuccess('Verification code sent successfully!');
       setForgotStep('verify-otp');
     } catch (err) {
-      console.warn('Backend request failed, falling back to local verification code generation:', err);
-      try {
-        const user = await getSupabaseUserByEmail(loginEmail);
-        if (!user) {
-          setForgotError('Email not registered in Kapi Adda.');
-          return;
-        }
-        setForgotSuccess('Verification code sent successfully! (Code: 123456)');
-        setForgotStep('verify-otp');
-      } catch (fallbackErr) {
-        setForgotError('Unable to connect. Please check your connection.');
-      }
+      console.warn('Password reset OTP request failed:', err);
+      setForgotError(err.message || 'Unable to send a verification code. Please try again.');
     } finally {
       setForgotLoading(false);
     }
@@ -911,13 +901,8 @@ export default function PremiumAuth({
       setForgotSuccess('Code verified successfully!');
       setForgotStep('set-password');
     } catch (err) {
-      console.warn('Backend verification failed, checking offline verification code fallback:', err);
-      if (forgotOtp.trim() === '123456') {
-        setForgotSuccess('Code verified successfully!');
-        setForgotStep('set-password');
-      } else {
-        setForgotError(err.message || 'Invalid verification code.');
-      }
+      console.warn('Password reset OTP verification failed:', err);
+      setForgotError(err.message || 'Invalid verification code.');
     } finally {
       setForgotLoading(false);
     }
@@ -969,29 +954,8 @@ export default function PremiumAuth({
         setForgotSuccess('');
       }, 2500);
     } catch (err) {
-      console.warn('Backend reset failed, running offline database fallback update:', err);
-      try {
-        const user = await getSupabaseUserByEmail(loginEmail);
-        if (!user) {
-          setForgotError('User not found.');
-          return;
-        }
-        await supabaseRest('users', `id=eq.${encodeURIComponent(user.id)}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ password_hash: `pbkdf2_${forgotNewPassword}` }),
-        });
-        setForgotSuccess('Your password has been reset successfully! Redirecting...');
-        setForgotOtp('');
-        setForgotNewPassword('');
-        setForgotConfirmPassword('');
-        setForgotStep('request-email');
-        setTimeout(() => {
-          transitionTo('login', 'left');
-          setForgotSuccess('');
-        }, 2500);
-      } catch (fallbackErr) {
-        setForgotError('Password reset failed. Please check your connection.');
-      }
+      console.warn('Password reset failed:', err);
+      setForgotError(err.message || 'Unable to reset your password. Please try again.');
     } finally {
       setForgotLoading(false);
     }

@@ -1,8 +1,32 @@
 import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
 
+export const runtime = 'nodejs';
+
 const SUPABASE_URL = "https://kvjvnrktnkenlsaatmxq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2anZucmt0bmtlbmxzYWF0bXhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo";
+
+const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASSWORD = process.env.SMTP_PASSWORD;
+const SMTP_FROM = process.env.SMTP_FROM || (SMTP_USER ? `"Kapi Adda" <${SMTP_USER}>` : undefined);
+
+const createMailTransporter = () => {
+  if (!SMTP_USER || !SMTP_PASSWORD) {
+    throw new Error('Email delivery is not configured. Please contact Kapi Adda support.');
+  }
+
+  return nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_PORT === 465,
+    auth: { user: SMTP_USER, pass: SMTP_PASSWORD },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
+  });
+};
 
 const supabaseRest = async (table, query = 'select=*', options = {}) => {
   const headers = {
@@ -38,6 +62,10 @@ export async function POST(request) {
     }
     const user = users[0];
 
+    // Confirm the provider is reachable before creating a code the user cannot receive.
+    const transporter = createMailTransporter();
+    await transporter.verify();
+
     // 2. Generate random 6-digit OTP code
     const otp = String(Math.floor(100000 + Math.random() * 900000));
 
@@ -51,26 +79,16 @@ export async function POST(request) {
       })
     });
 
-    // 4. Send email using Google SMTP credentials
-    const transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false, // TLS
-      auth: {
-        user: 'kapiadda@gmail.com',
-        pass: 'sqlz fajn cykv mizh',
-      },
-    });
-
     const mailOptions = {
-      from: '"Kapi Adda" <kapiadda@gmail.com>',
+      from: SMTP_FROM,
       to: emailNormalized,
       subject: 'Kapi Adda - Password Reset Verification Code',
       text: `Hello,\n\nYour Kapi Adda password reset verification code is: ${otp}\n\nThis code is valid for 15 minutes.\n\nBrew On,\nKapi Adda Team ☕`,
     };
 
-    await transporter.sendMail(mailOptions);
-    console.log(`[SERVERLESS OTP] Email sent successfully to ${emailNormalized}`);
+    const delivery = await transporter.sendMail(mailOptions);
+    if (!delivery.messageId) throw new Error('Email provider did not accept the verification message.');
+    console.log(`[SERVERLESS OTP] Verification email accepted with message ID ${delivery.messageId}`);
 
     return NextResponse.json({ message: 'Verification code sent to your email!' });
   } catch (error) {

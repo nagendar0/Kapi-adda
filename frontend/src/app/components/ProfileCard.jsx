@@ -217,9 +217,8 @@ export default function ProfileCard({ user, onUserUpdate, onSuccessRedirect, onL
       setPassSuccess('Verification code sent successfully to your email!');
       setPassStep('otp-verify');
     } catch (err) {
-      console.warn('Backend request-otp failed, falling back to offline code generation:', err);
-      setPassSuccess('Verification code generated successfully! (Code: 123456)');
-      setPassStep('otp-verify');
+      console.warn('Password reset OTP request failed:', err);
+      setPassError(err.message || 'Unable to send a verification code. Please try again.');
     } finally {
       setPassLoading(false);
     }
@@ -246,13 +245,8 @@ export default function ProfileCard({ user, onUserUpdate, onSuccessRedirect, onL
       setPassSuccess('Verification successful! You can now set your new password.');
       setPassStep('otp-set-password');
     } catch (err) {
-      console.warn('Backend verify-otp failed, falling back to offline code verification:', err);
-      if (otpCode.trim() === '123456') {
-        setPassSuccess('Verification successful! You can now set your new password.');
-        setPassStep('otp-set-password');
-      } else {
-        setPassError(err.message || 'Invalid or expired verification code.');
-      }
+      console.warn('Password reset OTP verification failed:', err);
+      setPassError(err.message || 'Invalid or expired verification code.');
     } finally {
       setPassLoading(false);
     }
@@ -295,41 +289,8 @@ export default function ProfileCard({ user, onUserUpdate, onSuccessRedirect, onL
       setConfirmPassword('');
       alert('Your password has been changed successfully!');
     } catch (err) {
-      console.warn('Backend reset-password failed, running offline database fallback update:', err);
-      try {
-        const patchUserPassword = async (column, value) => {
-          const res = await fetch(`${SUPABASE_URL}/rest/v1/users?${column}=eq.${encodeURIComponent(value)}`, {
-            method: 'PATCH',
-            headers: {
-              'apikey': SUPABASE_ANON_KEY,
-              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ password_hash: `pbkdf2_${newPassword}` })
-          });
-          if (!res.ok) {
-            const errData = await res.json().catch(() => ({}));
-            throw new Error(errData.message || 'Password update failed');
-          }
-        };
-
-        if (user?.id) {
-          await patchUserPassword('id', user.id);
-        } else if (user?.email) {
-          await patchUserPassword('email', String(user.email).trim().toLowerCase());
-        } else {
-          throw new Error('Account record not found.');
-        }
-
-        setPassSuccess('Password updated successfully!');
-        setPassStep('view');
-        setOtpCode('');
-        setNewPassword('');
-        setConfirmPassword('');
-        alert('Your password has been changed successfully!');
-      } catch (fallbackErr) {
-        setPassError(fallbackErr.message || 'Connection error.');
-      }
+      console.warn('Password reset failed:', err);
+      setPassError(err.message || 'Unable to reset your password. Please try again.');
     } finally {
       setPassLoading(false);
     }
