@@ -556,10 +556,29 @@ function buildLocalAssistantReply({ query, menuItems, mode, planner }) {
     }
 
     const recommendations = rankItems(personalChoices, mood).slice(0, 3);
+    if (!recommendations.length) {
+      return {
+        reply: `I couldn't find available items within your budget of ₹${budgetPerPerson} per person. Try a higher budget and let's plan again!`,
+        items: [],
+        options: ['Plan another meal', 'Explorer Mode'],
+      };
+    }
+
+    const totalCostPerPerson = recommendations.reduce((sum, item) => sum + itemPrice(item), 0);
+    const totalCost = totalCostPerPerson * members;
+    const changeLeft = budget - totalCost;
+
+    let tableReply = `🎉 **Meal Plan Generated (Total Budget: ₹${budget})** 🎉\n\n`;
+    tableReply += `I have created a combo for your party of ${members} under the budget:\n\n`;
+    tableReply += `| Combo Name | Items Included | Total | Change Left |\n`;
+    tableReply += `| :--- | :--- | :--- | :--- |\n`;
+    
+    const itemsStr = recommendations.map((item) => `${members > 1 ? `${members} x ` : ''}${item.name} (₹${itemPrice(item)} each)`).join(' + ');
+    tableReply += `| **Custom Planner Combo** | {itemsStr} | **₹${totalCost}** | ₹${changeLeft} |\n\n`;
+    tableReply += `I've loaded the product cards for these items below. Just click on any card to view its details or add it to your cart! 🛵✨`;
+
     return {
-      reply: recommendations.length
-        ? `For your party of **${members}** under **Rs.${budget}** budget, I suggest: ${listItems(recommendations)} (approx ₹${recommendations.reduce((sum, item) => sum + itemPrice(item), 0)} per person). This fits your preferences! 🤝`
-        : `I couldn't find available items within your budget of ₹${budgetPerPerson} per person. Try a higher budget and let's plan again!`,
+      reply: tableReply.replace('{itemsStr}', itemsStr),
       items: recommendations,
       options: ['Plan another meal', 'Explorer Mode'],
     };
@@ -590,8 +609,9 @@ function buildLocalAssistantReply({ query, menuItems, mode, planner }) {
       };
     }
     // General info on matched item
+    const isVeg = itemIsVegetarian(matchedItem);
     return {
-      reply: `**${matchedItem.name}** is a delicious item in our **${matchedItem.category}** section, priced at **₹${matchedItem.price}** (Status: **${matchedItem.availability_status || 'available'}**). \n\n*Description*: ${matchedItem.description || 'No description available.'}`,
+      reply: `**${matchedItem.name}** is a delicious item in our **${matchedItem.category}** section. \n\n- **Price**: ₹${matchedItem.price}\n- **Vegetarian**: ${isVeg ? 'Yes 🌿' : 'No 🍗'}\n- **Rating**: ${matchedItem.rating || '0.0'}★ (${matchedItem.rating_count || 0} reviews)\n- **Status**: ${matchedItem.availability_status || 'available'}\n\n*Description*: ${matchedItem.description || 'No description available.'}`,
       items: [matchedItem]
     };
   }
@@ -961,18 +981,20 @@ export default function AIAssistant({
         planner: localPlannerRef.current,
       });
       setPlannerStep(localPlannerRef.current.step || 1);
-      setIsTyping(false);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + 1,
-          role: 'bot',
-          text: localReply.reply,
-          items: localReply.items || [],
-          options: localReply.options || [],
-          timestamp: new Date(),
-        },
-      ]);
+      setTimeout(() => {
+        setIsTyping(false);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now() + 1,
+            role: 'bot',
+            text: localReply.reply,
+            items: localReply.items || [],
+            options: localReply.options || [],
+            timestamp: new Date(),
+          },
+        ]);
+      }, 1000);
       return;
     }
 
@@ -1002,54 +1024,55 @@ export default function AIAssistant({
         body: JSON.stringify({ user_id: user?.id, session_id: chatSessionId, message: cleanedText, lang: selectedLang }),
       });
       const data = await res.json();
-      setIsTyping(false);
-      
       const replyText = data.reply ?? data.message ?? 'I couldn\'t understand that. Could you rephrase?';
       
-      const botMsg = {
-        id: Date.now() + 1,
-        role: 'bot',
-        text: replyText,
-        items: data.items ?? [],
-        options: activeMode === 'planner' ? (data.options ?? []) : [],
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, botMsg]);
-      
-      if (isVoice && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(replyText);
+      setTimeout(() => {
+        setIsTyping(false);
+        const botMsg = {
+          id: Date.now() + 1,
+          role: 'bot',
+          text: replyText,
+          items: data.items ?? [],
+          options: activeMode === 'planner' ? (data.options ?? []) : [],
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, botMsg]);
         
-        const langMap = { te: 'te-IN', hi: 'hi-IN', en: 'en-US' };
-        utterance.lang = langMap[data.lang] || 'en-US';
-        
-        // Select an advanced, friendly voice based on language
-        const voices = window.speechSynthesis.getVoices();
-        let selectedVoice = null;
-        
-        if (data.lang === 'hi') {
-          selectedVoice = voices.find(v => v.lang.toLowerCase().startsWith('hi') && v.name.toLowerCase().includes('female')) ||
-                          voices.find(v => v.lang.toLowerCase().startsWith('hi'));
-        } else if (data.lang === 'te') {
-          selectedVoice = voices.find(v => v.lang.toLowerCase().startsWith('te') && v.name.toLowerCase().includes('female')) ||
-                          voices.find(v => v.lang.toLowerCase().startsWith('te'));
-        } else {
-          selectedVoice = voices.find(v => v.name.includes('Google UK English Female')) ||
-                          voices.find(v => v.name.includes('Microsoft Zira') || v.name.includes('Samantha') || v.name.includes('Google US English')) ||
-                          voices.find(v => v.lang.toLowerCase().startsWith('en') && v.name.toLowerCase().includes('female')) ||
-                          voices.find(v => v.lang.toLowerCase().startsWith('en'));
+        if (isVoice && window.speechSynthesis) {
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(replyText);
+          
+          const langMap = { te: 'te-IN', hi: 'hi-IN', en: 'en-US' };
+          utterance.lang = langMap[data.lang] || 'en-US';
+          
+          // Select an advanced, friendly voice based on language
+          const voices = window.speechSynthesis.getVoices();
+          let selectedVoice = null;
+          
+          if (data.lang === 'hi') {
+            selectedVoice = voices.find(v => v.lang.toLowerCase().startsWith('hi') && v.name.toLowerCase().includes('female')) ||
+                            voices.find(v => v.lang.toLowerCase().startsWith('hi'));
+          } else if (data.lang === 'te') {
+            selectedVoice = voices.find(v => v.lang.toLowerCase().startsWith('te') && v.name.toLowerCase().includes('female')) ||
+                            voices.find(v => v.lang.toLowerCase().startsWith('te'));
+          } else {
+            selectedVoice = voices.find(v => v.name.includes('Google UK English Female')) ||
+                            voices.find(v => v.name.includes('Microsoft Zira') || v.name.includes('Samantha') || v.name.includes('Google US English')) ||
+                            voices.find(v => v.lang.toLowerCase().startsWith('en') && v.name.toLowerCase().includes('female')) ||
+                            voices.find(v => v.lang.toLowerCase().startsWith('en'));
+          }
+                              
+          if (selectedVoice) {
+            utterance.voice = selectedVoice;
+          }
+          
+          // Adjust pitch and rate to sound friendly, energetic, and advanced
+          utterance.pitch = 1.1;
+          utterance.rate = 1.0;
+          
+          window.speechSynthesis.speak(utterance);
         }
-                            
-        if (selectedVoice) {
-          utterance.voice = selectedVoice;
-        }
-        
-        // Adjust pitch and rate to sound friendly, energetic, and advanced
-        utterance.pitch = 1.1;
-        utterance.rate = 1.0;
-        
-        window.speechSynthesis.speak(utterance);
-      }
+      }, 1000);
     } catch {
       setIsTyping(false);
       setMessages((prev) => [
