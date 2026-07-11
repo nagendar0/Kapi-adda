@@ -2101,8 +2101,8 @@ export default function Home() {
               </div>
               <div className="space-y-2 text-xs text-left">
                 <h6 className="text-amber-500 font-bold font-serif uppercase tracking-wider mb-2">Visit Us</h6>
-                <p>128 Espresso Way, Cyber District</p>
-                <p>Neo Delhi, 110001</p>
+                <p>Boyanapalli, Anamayacharaya University</p>
+                <p>Rajampet, Tallapaka, Andhra Pradesh 516126</p>
                 <p>Open Daily: 06:00 - 22:00</p>
               </div>
             </div>
