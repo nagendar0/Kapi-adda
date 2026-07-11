@@ -134,8 +134,11 @@ const BotAvatar = memo(function BotAvatar() {
 
 const MiniItemCard = memo(function MiniItemCard({ item, onSelect }) {
   const handleClick = () => {
-    onSelect?.(item);
+    if (item) {
+      onSelect?.(item);
+    }
   };
+  if (!item) return null;
   return (
     <div
       onClick={handleClick}
@@ -161,7 +164,7 @@ const MiniItemCard = memo(function MiniItemCard({ item, onSelect }) {
     >
       <img
         src={getImageForItem(item)}
-        alt={item.name}
+        alt={item.name || 'Menu Item'}
         style={{ width: '100%', height: 70, objectFit: 'cover', display: 'block' }}
       />
       <div style={{ padding: '6px 8px' }}>
@@ -176,7 +179,7 @@ const MiniItemCard = memo(function MiniItemCard({ item, onSelect }) {
             textOverflow: 'ellipsis',
           }}
         >
-          {item.name}
+          {item.name || 'Delicious Item'}
         </p>
         <p
           style={{
@@ -186,7 +189,7 @@ const MiniItemCard = memo(function MiniItemCard({ item, onSelect }) {
             fontWeight: 700,
           }}
         >
-          ₹{item.price}
+          ₹{item.price || 0}
         </p>
       </div>
     </div>
@@ -210,13 +213,13 @@ function renderTable(headers, rows, key) {
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', textAlign: 'left' }}>
         <thead>
           <tr style={{ background: 'rgba(245,158,11,0.14)', borderBottom: '1px solid rgba(245,158,11,0.25)' }}>
-            {headers.map((h, idx) => (
+            {headers && Array.isArray(headers) && headers.map((h, idx) => (
               <th key={idx} style={{ padding: '6px 8px', color: '#fbbf24', fontWeight: 700, whiteSpace: 'nowrap' }}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, rowIdx) => (
+          {rows && Array.isArray(rows) && rows.map((row, rowIdx) => (
             <tr
               key={rowIdx}
               style={{
@@ -224,7 +227,7 @@ function renderTable(headers, rows, key) {
                 background: rowIdx % 2 === 0 ? 'rgba(255,255,255,0.01)' : 'transparent'
               }}
             >
-              {row.map((cell, cellIdx) => (
+              {row && Array.isArray(row) && row.map((cell, cellIdx) => (
                 <td key={cellIdx} style={{ padding: '6px 8px', color: '#e2e8f0', lineHeight: 1.3 }}>{parseInlineMarkdown(cell)}</td>
               ))}
             </tr>
