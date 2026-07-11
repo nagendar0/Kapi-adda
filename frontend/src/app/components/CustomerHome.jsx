@@ -5,10 +5,8 @@ import { getImageForItem } from '../utils/imageMapper';
 import { useBreakpoint, useScreenProfile } from '../utils/responsive';
 import { fetchSharedOffers, getDefaultOffers, isOfferConfigCategory } from '../utils/sharedOffers';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' 
-  ? `http://${window.location.hostname}:8000`
-  : 'http://127.0.0.1:8000');
-const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname));
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+const HAS_BACKEND_API = true;
 const SUPABASE_URL = 'https://kvjvnrktnkenlsaatmxq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2anZucmt0bmtlbmxzYWF0bXhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo';
 const SUPABASE_HEADERS = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` };
@@ -808,7 +806,8 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
 
   const loadMenu = (isPolling = false) => {
     if (!isPolling) setLoading(true);
-    if (!HAS_BACKEND_API) {
+
+    const loadMenuFromSupabase = () => {
       const t = Date.now();
       Promise.all([
         fetch(`${SUPABASE_URL}/rest/v1/categories?select=*&t=${t}`, { headers: SUPABASE_HEADERS }),
@@ -854,10 +853,13 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
           setError('Could not load menu. Please try again.');
         })
         .finally(() => { if (!isPolling) setLoading(false); });
-      return;
-    }
+    };
+
     fetch(`${API_BASE}/api/menu?t=` + Date.now())
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error('Backend failed');
+        return r.json();
+      })
       .then((data) => {
         let items = [];
         if (Array.isArray(data)) {
@@ -877,12 +879,12 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
           items = data.items;
         }
         setMenuItems(items);
+        if (!isPolling) setLoading(false);
       })
       .catch((err) => {
-        console.error('Menu fetch error:', err);
-        setError('Could not load menu. Please try again.');
-      })
-      .finally(() => { if (!isPolling) setLoading(false); });
+        console.warn('Backend menu fetch error, falling back to Supabase:', err);
+        loadMenuFromSupabase();
+      });
   };
 
   useEffect(() => {

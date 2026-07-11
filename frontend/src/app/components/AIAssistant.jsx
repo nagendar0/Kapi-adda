@@ -4,10 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import { getImageForItem } from '../utils/imageMapper';
 import { useScreenProfile } from '../utils/responsive';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' 
-  ? `http://${window.location.hostname}:8000`
-  : 'http://127.0.0.1:8000');
-const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && !window.location.hostname.includes('.vercel.app'));
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+const HAS_BACKEND_API = true;
 const SUPABASE_URL = 'https://kvjvnrktnkenlsaatmxq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2anZucmt0bmtlbmxzYWF0bXhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo';
 
@@ -1073,18 +1071,30 @@ export default function AIAssistant({
           window.speechSynthesis.speak(utterance);
         }
       }, 1000);
-    } catch {
-      setIsTyping(false);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + 1,
-          role: 'bot',
-          text: '⚠️ Oops! I seem to be having trouble connecting. Please try again in a moment.',
-          items: [],
-          timestamp: new Date(),
-        },
-      ]);
+    } catch (err) {
+      console.warn('Backend assistant API failed, falling back to offline assistant:', err);
+      recordDeployedSearch(user?.id, cleanedText);
+      const localReply = buildLocalAssistantReply({
+        query: cleanedText,
+        menuItems,
+        mode: activeMode,
+        planner: localPlannerRef.current,
+      });
+      setPlannerStep(localPlannerRef.current.step || 1);
+      setTimeout(() => {
+        setIsTyping(false);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now() + 1,
+            role: 'bot',
+            text: localReply.reply,
+            items: localReply.items || [],
+            options: localReply.options || [],
+            timestamp: new Date(),
+          },
+        ]);
+      }, 1000);
     }
   }
 

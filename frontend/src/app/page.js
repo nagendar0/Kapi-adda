@@ -10,16 +10,17 @@ import AIAssistant from "./components/AIAssistant";
 import OwnerDashboard from "./components/OwnerDashboard";
 import ProfileCard from "./components/ProfileCard";
 import { useBreakpoint, useScreenProfile } from "./utils/responsive";
+import {
+  API_BASE as BACKEND_URL,
+  HAS_BACKEND_API,
+  HAS_SUPABASE,
+  SUPABASE_ANON_KEY,
+  SUPABASE_URL,
+  deploymentConfigurationError,
+} from "./utils/runtimeConfig";
 
 // Initialize Supabase Client
-const SUPABASE_URL = "https://kvjvnrktnkenlsaatmxq.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2anZucmt0bmtlbmxzYWF0bXhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo";
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined'
-  ? `http://${window.location.hostname}:8000`
-  : 'http://127.0.0.1:8000');
-const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && !window.location.hostname.includes('.vercel.app'));
+const supabase = HAS_SUPABASE ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
 // Cookie helper functions
 const getCookie = (name) => {
@@ -463,6 +464,7 @@ export default function Home() {
 
   // Load Initial Menu & Data
   const loadMenuFromSupabase = async () => {
+    if (!supabase) throw new Error(deploymentConfigurationError);
     const [{ data: categoryRows, error: categoryError }, { data: itemRows, error: itemError }, { data: reviewRows, error: reviewError }] = await Promise.all([
       supabase.from('categories').select('*'),
       supabase.from('menu_items').select('*'),
@@ -578,16 +580,14 @@ export default function Home() {
 
     loadMenu();
     loadAdminDashboard();
-    const ordersSubscription = supabase
-      .channel("realtime-orders")
+    const ordersSubscription = supabase?.channel("realtime-orders")
       .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => {
         loadAdminDashboard();
         showNotification("New Order updates received in real-time!");
       })
       .subscribe();
 
-    const inventorySubscription = supabase
-      .channel("realtime-inventory")
+    const inventorySubscription = supabase?.channel("realtime-inventory")
       .on("postgres_changes", { event: "*", schema: "public", table: "inventory" }, () => {
         loadAdminDashboard();
         loadMenu();
@@ -595,23 +595,20 @@ export default function Home() {
       })
       .subscribe();
 
-    const menuSubscription = supabase
-      .channel("realtime-menu")
+    const menuSubscription = supabase?.channel("realtime-menu")
       .on("postgres_changes", { event: "*", schema: "public", table: "menu_items" }, () => {
         loadMenu();
         showNotification("Menu items catalog updated in real-time!");
       })
       .subscribe();
 
-    const categoriesSubscription = supabase
-      .channel("realtime-categories")
+    const categoriesSubscription = supabase?.channel("realtime-categories")
       .on("postgres_changes", { event: "*", schema: "public", table: "categories" }, () => {
         loadMenu();
       })
       .subscribe();
 
-    const reviewsSubscription = supabase
-      .channel("realtime-reviews")
+    const reviewsSubscription = supabase?.channel("realtime-reviews")
       .on("postgres_changes", { event: "*", schema: "public", table: "reviews" }, () => {
         loadMenu();
       })
@@ -628,8 +625,7 @@ export default function Home() {
     window.addEventListener('kapi_reviews_updated', refreshMenu);
     window.addEventListener('storage', handleStorage);
 
-    const expensesSubscription = supabase
-      .channel("realtime-expenses")
+    const expensesSubscription = supabase?.channel("realtime-expenses")
       .on("postgres_changes", { event: "*", schema: "public", table: "expenses" }, () => {
         loadAdminDashboard();
         showNotification("Operating expenses updated in real-time!");
@@ -637,12 +633,12 @@ export default function Home() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(ordersSubscription);
-      supabase.removeChannel(inventorySubscription);
-      supabase.removeChannel(menuSubscription);
-      supabase.removeChannel(categoriesSubscription);
-      supabase.removeChannel(reviewsSubscription);
-      supabase.removeChannel(expensesSubscription);
+      if (ordersSubscription) supabase?.removeChannel(ordersSubscription);
+      if (inventorySubscription) supabase?.removeChannel(inventorySubscription);
+      if (menuSubscription) supabase?.removeChannel(menuSubscription);
+      if (categoriesSubscription) supabase?.removeChannel(categoriesSubscription);
+      if (reviewsSubscription) supabase?.removeChannel(reviewsSubscription);
+      if (expensesSubscription) supabase?.removeChannel(expensesSubscription);
       clearInterval(menuRefreshInterval);
       window.removeEventListener('kapi_menu_updated', refreshMenu);
       window.removeEventListener('kapi_reviews_updated', refreshMenu);
