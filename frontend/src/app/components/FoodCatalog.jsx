@@ -14,6 +14,7 @@ const SUPABASE_HEADERS = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${S
 
 
 function StarRating({ rating, count }) {
+  const numericRating = Number(rating) || 0;
   const stars = Array.from({ length: 5 }, (_, i) => i + 1);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -24,8 +25,8 @@ function StarRating({ rating, count }) {
             width="14"
             height="14"
             viewBox="0 0 24 24"
-            fill={star <= Math.round(rating) ? '#f59e0b' : 'none'}
-            stroke={star <= Math.round(rating) ? '#f59e0b' : '#6b7280'}
+            fill={star <= Math.round(numericRating) ? '#f59e0b' : 'none'}
+            stroke={star <= Math.round(numericRating) ? '#f59e0b' : '#6b7280'}
             strokeWidth="2"
           >
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
@@ -33,7 +34,7 @@ function StarRating({ rating, count }) {
         ))}
       </div>
       <span style={{ color: '#9ca3af', fontSize: '12px' }}>
-        {rating?.toFixed(1)} ({count || 0})
+        {numericRating.toFixed(1)} ({count || 0})
       </span>
     </div>
   );
@@ -219,7 +220,7 @@ function FoodCard({ item, onViewFood, onAddToCart, cart, breakpoint }) {
         </p>
 
         {/* Rating */}
-        <StarRating rating={item.rating !== undefined && item.rating !== null ? item.rating : 0} count={item.review_count || item.reviews || 0} />
+        <StarRating rating={item.rating !== undefined && item.rating !== null ? item.rating : 0} count={item.rating_count || item.review_count || item.reviews || 0} />
 
         {/* Actions */}
         <div style={{ display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '4px' }}>
@@ -317,20 +318,36 @@ export default function FoodCatalog({ user, onViewFood, onAddToCart, cart, onOpe
       if (!isPolling) setLoading(true);
       setError(null);
       if (!HAS_BACKEND_API) {
-        const [categoriesResponse, itemsResponse] = await Promise.all([
+        const [categoriesResponse, itemsResponse, reviewsResponse] = await Promise.all([
           fetch(`${SUPABASE_URL}/rest/v1/categories?select=*`, { headers: SUPABASE_HEADERS }),
           fetch(`${SUPABASE_URL}/rest/v1/menu_items?select=*`, { headers: SUPABASE_HEADERS }),
+          fetch(`${SUPABASE_URL}/rest/v1/reviews?select=menu_item_id,rating`, { headers: SUPABASE_HEADERS }),
         ]);
-        if (!categoriesResponse.ok || !itemsResponse.ok) throw new Error('Unable to load menu data');
-        const [categoryRows, itemRows] = await Promise.all([categoriesResponse.json(), itemsResponse.json()]);
+        if (!categoriesResponse.ok || !itemsResponse.ok || !reviewsResponse.ok) throw new Error('Unable to load menu data');
+        const [categoryRows, itemRows, reviewRows] = await Promise.all([
+          categoriesResponse.json(),
+          itemsResponse.json(),
+          reviewsResponse.json(),
+        ]);
         const visibleCategories = (categoryRows || []).filter((category) => !(category.description || '').endsWith('[HIDDEN]'));
         const categoryMap = Object.fromEntries(visibleCategories.map((category) => [category.id, category.name]));
+        const ratingsByItem = {};
+        (reviewRows || []).forEach((review) => {
+          const value = Number(review.rating);
+          if (!review.menu_item_id || !Number.isFinite(value)) return;
+          (ratingsByItem[review.menu_item_id] ||= []).push(value);
+        });
         setCategoriesList(visibleCategories.map((category) => category.name));
-        setMenuItems((itemRows || []).filter((item) => categoryMap[item.category_id]).map((item) => ({
-          ...item,
-          category: categoryMap[item.category_id],
-          is_available: item.availability_status !== 'out_of_stock',
-        })));
+        setMenuItems((itemRows || []).filter((item) => categoryMap[item.category_id]).map((item) => {
+          const ratings = ratingsByItem[item.id] || [];
+          return {
+            ...item,
+            category: categoryMap[item.category_id],
+            rating: ratings.length ? Number((ratings.reduce((total, value) => total + value, 0) / ratings.length).toFixed(1)) : 0,
+            rating_count: ratings.length,
+            is_available: item.availability_status !== 'out_of_stock',
+          };
+        }));
         return;
       }
       const res = await fetch(`${API_BASE}/api/menu?t=` + Date.now());

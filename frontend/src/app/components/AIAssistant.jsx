@@ -447,61 +447,171 @@ function buildLocalAssistantReply({ query, menuItems, mode, planner }) {
     };
   }
 
+  // 1. MEAL PLANNER STATE MACHINE
   if (mode === 'planner') {
-    if (normalized.includes('plan another')) {
+    if (normalized.includes('plan another') || normalized.includes('restart')) {
       planner.step = 1;
       return {
-        reply: 'Great. **Step 1 of 3:** What is your mood right now?',
+        reply: 'Great! Let\'s build another plan. 📋\n\n**Step 1 of 5**: What is your mood now?',
         items: [],
-        options: ['Happy', 'Calm', 'Tired', 'Hungry'],
+        options: ["Happy", "Calm", "Tired", "Hungry", "Excited"],
       };
     }
 
-    if (planner.step === 1) {
+    if (planner.step === 1 || !planner.step) {
       planner.mood = normalized || 'calm';
       planner.step = 2;
       return {
-        reply: 'Nice. **Step 2 of 3:** What would you like to have?',
+        reply: `Got it, feeling **${query}**! 🌟\n\n**Step 2 of 5**: What type of food are you in the mood for?`,
         items: [],
-        options: ['Vegetarian', 'Drink', 'Sweet', 'Anything'],
+        options: ["Veg 🌿", "Non-Veg 🍗", "Sweet 🍰", "Drink ☕", "Anything 🍽️"],
       };
     }
 
     if (planner.step === 2) {
-      planner.preference = normalized || 'anything';
+      let taste = 'anything';
+      if (normalized.includes('non')) taste = 'non-veg';
+      else if (normalized.includes('veg')) taste = 'veg';
+      else if (normalized.includes('sweet') || normalized.includes('dessert') || normalized.includes('cake')) taste = 'sweet';
+      else if (normalized.includes('drink') || normalized.includes('beverage') || normalized.includes('coffee') || normalized.includes('tea')) taste = 'drink';
+      
+      planner.taste = taste;
       planner.step = 3;
       return {
-        reply: 'Almost there. **Step 3 of 3:** What is your budget in rupees?',
+        reply: `Nice, **${taste.toUpperCase()}** options! 🍽️\n\n**Step 3 of 5**: Select your flavor profile preference:`,
         items: [],
-        options: ['Rs.50', 'Rs.100', 'Rs.150', 'Rs.200'],
+        options: ["Spicy 🌶️", "Mild / Sweet 🍯", "No Preference 🍽️"],
       };
     }
 
+    if (planner.step === 3) {
+      let flavor = 'no_preference';
+      if (normalized.includes('spicy')) flavor = 'spicy';
+      else if (normalized.includes('mild') || normalized.includes('sweet')) flavor = 'mild';
+      
+      planner.flavor = flavor;
+      planner.step = 4;
+      return {
+        reply: `Flavor preference: **${query}**! 🌶️🍯\n\n**Step 4 of 5**: How many members are in your party?`,
+        items: [],
+        options: ["1 Person 👤", "2 People 👥", "3 People 👥✨", "4+ People 🌟"],
+      };
+    }
+
+    if (planner.step === 4) {
+      const match = normalized.match(/\d+/);
+      const members = match ? parseInt(match[0]) : (normalized.includes('one') ? 1 : normalized.includes('two') ? 2 : normalized.includes('three') ? 3 : 1);
+      planner.members = members;
+      planner.step = 5;
+      return {
+        reply: `Ordering for **${members}** person/people! 👥\n\n**Step 5 of 5**: Finally, how much money do you have to spend today? 💰 (Please enter your budget in rupees in the box below)`,
+        items: [],
+        options: ["Rs.50", "Rs.100", "Rs.150", "Rs.200"],
+      };
+    }
+
+    // Step 5: Budget entry and combo generation
     const budgetMatch = normalized.match(/\d+/);
     if (!budgetMatch) {
       return {
-        reply: 'Please enter a budget such as **50**, **100**, or **150** rupees.',
+        reply: 'Oops! Please enter a valid number for your budget (e.g. 150) so I can build your plan.',
         items: [],
         options: ['Rs.50', 'Rs.100', 'Rs.150', 'Rs.200'],
       };
     }
 
     const budget = Number(budgetMatch[0]);
-    let choices = available.filter((item) => itemPrice(item) <= budget);
-    if (planner.preference?.includes('vegetarian')) choices = choices.filter(itemIsVegetarian);
-    if (planner.preference?.includes('drink')) choices = selectByTerms(choices, ['coffee', 'tea', 'chai', 'juice', 'shake', 'mojito', 'beverage']);
-    if (planner.preference?.includes('sweet')) choices = selectByTerms(choices, ['cake', 'ice cream', 'shake', 'chocolate', 'sweet']);
-    const recommendations = rankItems(choices.length ? choices : available.filter((item) => itemPrice(item) <= budget), planner.mood).slice(0, 3);
+    const members = planner.members || 1;
+    const taste = planner.taste || 'anything';
+    const flavor = planner.flavor || 'no_preference';
+    const mood = planner.mood || 'calm';
+
+    // Reset planner step
     planner.step = 1;
+
+    let choices = available;
+
+    // Taste filter
+    if (taste === 'veg') {
+      choices = choices.filter(itemIsVegetarian);
+    } else if (taste === 'non-veg') {
+      choices = choices.filter(item => !itemIsVegetarian(item));
+    } else if (taste === 'sweet') {
+      choices = selectByTerms(choices, ['cake', 'ice cream', 'shake', 'chocolate', 'sweet', 'muffin', 'pastry']);
+    } else if (taste === 'drink') {
+      choices = selectByTerms(choices, ['coffee', 'tea', 'chai', 'juice', 'shake', 'mojito', 'beverage', 'cooler']);
+    }
+
+    // Flavor filter
+    if (flavor === 'spicy') {
+      choices = selectByTerms(choices, ['spicy', 'chili', 'pepper', 'samosa', 'puff', 'momos', 'prawn', 'fries', 'roll']);
+    } else if (flavor === 'mild') {
+      choices = selectByTerms(choices, ['sweet', 'chocolate', 'vanilla', 'mango', 'banana', 'rose', 'mild']);
+    }
+
+    const budgetPerPerson = budget / members;
+    let personalChoices = choices.filter((item) => itemPrice(item) <= budgetPerPerson);
+    if (!personalChoices.length) {
+      personalChoices = available.filter((item) => itemPrice(item) <= budgetPerPerson);
+    }
+
+    const recommendations = rankItems(personalChoices, mood).slice(0, 3);
     return {
       reply: recommendations.length
-        ? `For your **Rs.${budget}** plan, I recommend ${listItems(recommendations)}. These choices fit your preference and are available now.`
-        : `I could not find an available item within **Rs.${budget}**. Try a slightly higher budget and I will build another plan.`,
+        ? `For your party of **${members}** under **Rs.${budget}** budget, I suggest: ${listItems(recommendations)} (approx ₹${recommendations.reduce((sum, item) => sum + itemPrice(item), 0)} per person). This fits your preferences! 🤝`
+        : `I couldn't find available items within your budget of ₹${budgetPerPerson} per person. Try a higher budget and let's plan again!`,
       items: recommendations,
       options: ['Plan another meal', 'Explorer Mode'],
     };
   }
 
+  // 2. EXPLORER MODE SPECIFIC MATCHES
+  
+  // Specific Item Check
+  const matchedItem = available.find(item => normalized.includes(item.name.toLowerCase()));
+  if (matchedItem) {
+    if (/(price|cost|how much|rupee|rs|₹)/.test(normalized)) {
+      return {
+        reply: `The price of **${matchedItem.name}** is **₹${matchedItem.price}**. It is currently **${matchedItem.availability_status || 'available'}**.`,
+        items: [matchedItem]
+      };
+    }
+    if (/(review|rating|star|comment|feedback|customer)/.test(normalized)) {
+      return {
+        reply: `**${matchedItem.name}** has a rating of **${matchedItem.rating || '0.0'}**★ (${matchedItem.rating_count || 0} reviews). It is a top choice in our **${matchedItem.category}** section!`,
+        items: [matchedItem]
+      };
+    }
+    if (/(available|have|stock|buy|get)/.test(normalized)) {
+      const availText = matchedItem.availability_status === 'available' ? 'in stock and ready to order' : 'currently out of stock';
+      return {
+        reply: `Yes, **${matchedItem.name}** is **${availText}** for **₹${matchedItem.price}**.`,
+        items: [matchedItem]
+      };
+    }
+    // General info on matched item
+    return {
+      reply: `**${matchedItem.name}** is a delicious item in our **${matchedItem.category}** section, priced at **₹${matchedItem.price}** (Status: **${matchedItem.availability_status || 'available'}**). \n\n*Description*: ${matchedItem.description || 'No description available.'}`,
+      items: [matchedItem]
+    };
+  }
+
+  // Category Checks
+  const matchedCat = ['snacks', 'cakes', 'hot beverages', 'puffs', 'ice creams', 'coolers', 'milk shakes', 'shakes', 'juices'].find(cat => normalized.includes(cat));
+  if (matchedCat) {
+    const catItems = available.filter(item => {
+      const catLower = item.category.toLowerCase();
+      return catLower.includes(matchedCat) || (matchedCat === 'shakes' && catLower.includes('milk shakes'));
+    });
+    if (catItems.length) {
+      return {
+        reply: `Here are some popular options in our **${catItems[0].category}** section: ${listItems(catItems.slice(0, 5))}.`,
+        items: catItems.slice(0, 4)
+      };
+    }
+  }
+
+  // Budget query
   const budgetMatch = normalized.match(/(?:under|below|less than|within|rs\.?|₹)\s*(\d+)/) || (normalized.match(/^\s*(\d+)\s*$/) ? normalized.match(/^\s*(\d+)\s*$/) : null);
   if (budgetMatch) {
     const budget = Number(budgetMatch[1]);
@@ -514,11 +624,12 @@ function buildLocalAssistantReply({ query, menuItems, mode, planner }) {
     };
   }
 
+  // Weather checks
   if (/(cold|chill|rain|winter|cool outside)/.test(normalized)) {
-    const warm = rankItems(selectByTerms(available, ['coffee', 'tea', 'chai', 'hot chocolate', 'malt', 'latte', 'beverage']), normalized).slice(0, 3);
+    const warm = rankItems(selectByTerms(available, ['coffee', 'tea', 'chai', 'hot chocolate', 'malt', 'latte', 'beverage', 'puff', 'samosa', 'momo']), normalized).slice(0, 3);
     const picks = warm.length ? warm : featured.slice(0, 3);
     return {
-      reply: `It is a good time for something warm. I recommend ${listItems(picks)}. My first pick is **${picks[0]?.name}**.`,
+      reply: `It's a good time for something warm. I recommend trying our ${listItems(picks)}.`,
       items: picks,
     };
   }
@@ -527,11 +638,12 @@ function buildLocalAssistantReply({ query, menuItems, mode, planner }) {
     const cool = rankItems(selectByTerms(available, ['juice', 'shake', 'mojito', 'cooler', 'ice cream', 'cold']), normalized).slice(0, 3);
     const picks = cool.length ? cool : featured.slice(0, 3);
     return {
-      reply: `For warm weather, try ${listItems(picks)}. They are refreshing choices from the current menu.`,
+      reply: `For warm weather, beat the heat with our: ${listItems(picks)}.`,
       items: picks,
     };
   }
 
+  // Vegetarian check
   if (/(vegetarian|veg|veggie)/.test(normalized)) {
     const picks = rankItems(available.filter(itemIsVegetarian), normalized).slice(0, 4);
     return {
@@ -540,6 +652,7 @@ function buildLocalAssistantReply({ query, menuItems, mode, planner }) {
     };
   }
 
+  // Conversation/Helper Checks
   if (/(usual|order again)/.test(normalized)) {
     return {
       reply: `Here are popular available choices to start with: ${listItems(featured.slice(0, 3))}.`,
@@ -566,7 +679,7 @@ function buildLocalAssistantReply({ query, menuItems, mode, planner }) {
   }
 
   return {
-    reply: `I can help with menu items, vegetarian choices, weather-based recommendations, and budgets. My current picks are ${listItems(featured.slice(0, 3))}.`,
+    reply: `I can help you check menu prices, view reviews, find vegetarian choices, or plan a group combo in **Meal Planner Mode**! 📋 \n\nWhat can I help you find today?`,
     items: featured.slice(0, 3),
     options: ['It is cold outside', 'Vegetarian options', 'Under Rs.100', 'Recommend a special'],
   };

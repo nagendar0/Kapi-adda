@@ -487,7 +487,8 @@ export default function Home() {
           const ratings = ratingsByItem[item.id] || [];
           return {
             ...item,
-            rating: ratings.length ? Number((ratings.reduce((total, rating) => total + rating, 0) / ratings.length).toFixed(1)) : (item.rating || 0),
+            // Product ratings are calculated only from saved customer reviews.
+            rating: ratings.length ? Number((ratings.reduce((total, rating) => total + rating, 0) / ratings.length).toFixed(1)) : 0,
             rating_count: ratings.length,
             is_available: item.availability_status !== 'out_of_stock',
           };
@@ -602,6 +603,31 @@ export default function Home() {
       })
       .subscribe();
 
+    const categoriesSubscription = supabase
+      .channel("realtime-categories")
+      .on("postgres_changes", { event: "*", schema: "public", table: "categories" }, () => {
+        loadMenu();
+      })
+      .subscribe();
+
+    const reviewsSubscription = supabase
+      .channel("realtime-reviews")
+      .on("postgres_changes", { event: "*", schema: "public", table: "reviews" }, () => {
+        loadMenu();
+      })
+      .subscribe();
+
+    const refreshMenu = () => loadMenu();
+    const handleStorage = (event) => {
+      if (event.key === 'kapi_menu_updated' || event.key === 'kapi_reviews_updated') refreshMenu();
+    };
+    const menuRefreshInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') refreshMenu();
+    }, 20000);
+    window.addEventListener('kapi_menu_updated', refreshMenu);
+    window.addEventListener('kapi_reviews_updated', refreshMenu);
+    window.addEventListener('storage', handleStorage);
+
     const expensesSubscription = supabase
       .channel("realtime-expenses")
       .on("postgres_changes", { event: "*", schema: "public", table: "expenses" }, () => {
@@ -614,7 +640,13 @@ export default function Home() {
       supabase.removeChannel(ordersSubscription);
       supabase.removeChannel(inventorySubscription);
       supabase.removeChannel(menuSubscription);
+      supabase.removeChannel(categoriesSubscription);
+      supabase.removeChannel(reviewsSubscription);
       supabase.removeChannel(expensesSubscription);
+      clearInterval(menuRefreshInterval);
+      window.removeEventListener('kapi_menu_updated', refreshMenu);
+      window.removeEventListener('kapi_reviews_updated', refreshMenu);
+      window.removeEventListener('storage', handleStorage);
     };
   }, []);
 

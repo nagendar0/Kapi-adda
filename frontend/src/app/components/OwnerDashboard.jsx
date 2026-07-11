@@ -3475,6 +3475,7 @@ export default function OwnerDashboard({
 
         {/* TAB: USER MANAGEMENT */}
         {activeTab === 'users' && (() => {
+          const activeUser = selectedUser ? (adminUsers.find(u => u.id === selectedUser.id) || selectedUser) : null;
           const search = usersSearch.toLowerCase();
           const filtered = adminUsers
             .filter(u =>
@@ -3659,7 +3660,9 @@ export default function OwnerDashboard({
               </div>
 
               {/* Right: User Detail Panel */}
-              {selectedUser && (
+              {activeUser && (() => {
+                const selectedUser = activeUser;
+                return (
                 <div style={{
                   flex: 1,
                   background: 'rgba(255,255,255,0.015)',
@@ -3884,7 +3887,8 @@ export default function OwnerDashboard({
                     <div style={{ textAlign: 'center', padding: '30px', color: COLORS.textMuted, fontSize: '13px' }}>No activity recorded for this user yet.</div>
                   )}
                 </div>
-              )}
+              );
+              })()}
             </div>
           );
         })()}

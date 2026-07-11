@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createClient } from '@supabase/supabase-js';
 import { PasswordChecklist } from './PremiumAuth';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' 
@@ -7,8 +8,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefine
 const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && !window.location.hostname.includes('.vercel.app'));
 const SUPABASE_URL = 'https://kvjvnrktnkenlsaatmxq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo';
-
-
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const BACKEND_URL = `${API_BASE}`;
 
 // Helper to set cookie
@@ -19,7 +19,7 @@ function setCookie(name, value, days) {
     date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
     expires = "; expires=" + date.toUTCString();
   }
-  document.cookie = name + "=" + (value || "") + expires + "; path=/";
+  document.cookie = name + "=" + encodeURIComponent(value || "") + expires + "; path=/";
 }
 
 // Helper to get cookie
@@ -144,36 +144,31 @@ export default function ProfileCard({ user, onUserUpdate, onSuccessRedirect, onL
     setProfileLoading(true);
     try {
       if (!HAS_BACKEND_API) {
-        const patchProfile = async (filter) => {
-          const res = await fetch(`${SUPABASE_URL}/rest/v1/users?${filter}`, {
+        const patchProfile = async (column, value) => {
+          const res = await fetch(`${SUPABASE_URL}/rest/v1/users?${column}=eq.${encodeURIComponent(value)}`, {
             method: 'PATCH',
             headers: {
-              apikey: SUPABASE_ANON_KEY,
-              Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+              'apikey': SUPABASE_ANON_KEY,
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
               'Content-Type': 'application/json',
-              Prefer: 'return=representation',
+              'Prefer': 'return=representation'
             },
-            body: JSON.stringify({ name: name.trim() }),
+            body: JSON.stringify({ name: name.trim() })
           });
-          const text = await res.text();
-          let rows = [];
-          try {
-            rows = text ? JSON.parse(text) : [];
-          } catch {
-            rows = [];
-          }
           if (!res.ok) {
-            throw new Error(text || 'Failed to update profile');
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.message || 'Failed to update profile');
           }
-          return Array.isArray(rows) ? rows : [];
+          const data = await res.json();
+          return Array.isArray(data) ? data : [];
         };
 
         let rows = [];
         if (user?.id) {
-          rows = await patchProfile(`id=eq.${encodeURIComponent(user.id)}`);
+          rows = await patchProfile('id', user.id);
         }
         if ((!rows || !rows[0]) && user?.email) {
-          rows = await patchProfile(`email=eq.${encodeURIComponent(String(user.email).trim().toLowerCase())}`);
+          rows = await patchProfile('email', String(user.email).trim().toLowerCase());
         }
         if (!rows || !rows[0]) {
           throw new Error('Account record not found. Please sign in again.');

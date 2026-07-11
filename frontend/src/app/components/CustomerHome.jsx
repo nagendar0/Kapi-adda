@@ -90,7 +90,7 @@ function StarRating({ rating }) {
   return (
     <span style={{ fontSize: 13, letterSpacing: 1 }}>
       {[1, 2, 3, 4, 5].map((s) => (
-        <span key={s} style={{ color: s <= stars ? COLORS.gold : COLORS.textDim }}>★</span>
+        <span key={s} style={{ color: s <= stars ? COLORS.gold : '#4b5563' }}>★</span>
       ))}
     </span>
   );
@@ -809,24 +809,49 @@ export default function CustomerHome({ user, onViewFood, onOpenChat, breakpoint:
   const loadMenu = (isPolling = false) => {
     if (!isPolling) setLoading(true);
     if (!HAS_BACKEND_API) {
+      const cacheBustHeaders = {
+        ...SUPABASE_HEADERS,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      };
+      const t = Date.now();
       Promise.all([
-        fetch(`${SUPABASE_URL}/rest/v1/categories?select=*`, { headers: SUPABASE_HEADERS }),
-        fetch(`${SUPABASE_URL}/rest/v1/menu_items?select=*`, { headers: SUPABASE_HEADERS }),
+        fetch(`${SUPABASE_URL}/rest/v1/categories?select=*&t=${t}`, { headers: cacheBustHeaders }),
+        fetch(`${SUPABASE_URL}/rest/v1/menu_items?select=*&t=${t}`, { headers: cacheBustHeaders }),
+        fetch(`${SUPABASE_URL}/rest/v1/reviews?select=menu_item_id,rating&t=${t}`, { headers: cacheBustHeaders }),
       ])
-        .then(async ([categoriesResponse, itemsResponse]) => {
-          if (!categoriesResponse.ok || !itemsResponse.ok) throw new Error('Unable to load menu data');
-          const [categoryRows, itemRows] = await Promise.all([categoriesResponse.json(), itemsResponse.json()]);
+        .then(async ([categoriesResponse, itemsResponse, reviewsResponse]) => {
+          if (!categoriesResponse.ok || !itemsResponse.ok || !reviewsResponse.ok) throw new Error('Unable to load menu data');
+          const [categoryRows, itemRows, reviewRows] = await Promise.all([
+            categoriesResponse.json(),
+            itemsResponse.json(),
+            reviewsResponse.json(),
+          ]);
           const publicCategories = (categoryRows || []).filter((category) =>
             !isOfferConfigCategory(category) && !(category.description || '').endsWith('[HIDDEN]')
           );
           const publicCategoryIds = new Set(publicCategories.map((category) => category.id));
           const categoryMap = Object.fromEntries(publicCategories.map((category) => [category.id, category.name]));
+
+          const ratingsByItem = {};
+          (reviewRows || []).forEach((review) => {
+            const value = Number(review.rating);
+            if (!review.menu_item_id || !Number.isFinite(value)) return;
+            (ratingsByItem[review.menu_item_id] ||= []).push(value);
+          });
+
           setCategoriesList(publicCategories.map((category) => category.name));
-          setMenuItems((itemRows || []).filter((item) => publicCategoryIds.has(item.category_id)).map((item) => ({
-            ...item,
-            category: categoryMap[item.category_id] || 'Menu',
-            is_available: item.availability_status !== 'out_of_stock',
-          })));
+          setMenuItems((itemRows || []).filter((item) => publicCategoryIds.has(item.category_id)).map((item) => {
+            const ratings = ratingsByItem[item.id] || [];
+            return {
+              ...item,
+              category: categoryMap[item.category_id] || 'Menu',
+              rating: ratings.length ? Number((ratings.reduce((total, value) => total + value, 0) / ratings.length).toFixed(1)) : 0,
+              rating_count: ratings.length,
+              is_available: item.availability_status !== 'out_of_stock',
+            };
+          }));
         })
         .catch((err) => {
           console.warn('Supabase menu fallback unavailable:', err);

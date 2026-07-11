@@ -135,12 +135,17 @@ export default function FoodDetail({ item, user, onClose, onAddToCart, breakpoin
     setReviewsLoading(true);
     const reviewsUrl = HAS_BACKEND_API
       ? `${API_BASE}/api/reviews/${item.id}`
-      : `${SUPABASE_URL}/rest/v1/reviews?select=*&menu_item_id=eq.${encodeURIComponent(item.id)}`;
+      : `${SUPABASE_URL}/rest/v1/reviews?select=*,users(name)&menu_item_id=eq.${encodeURIComponent(item.id)}`;
     fetch(reviewsUrl, { headers: HAS_BACKEND_API ? undefined : SUPABASE_HEADERS })
       .then((res) => res.ok ? res.json() : [])
       .catch(() => [])
       .then((data) => {
-        setReviews(data && Array.isArray(data.reviews) ? data.reviews : (Array.isArray(data) ? data : []));
+        const list = data && Array.isArray(data.reviews) ? data.reviews : (Array.isArray(data) ? data : []);
+        setReviews(list.map((r) => ({
+          ...r,
+          comment: r.comment ?? r.review_text ?? '',
+          reviewer_name: r.reviewer_name ?? r.users?.name ?? 'Anonymous',
+        })));
         setReviewsLoading(false);
       });
   }, [item]);
@@ -171,19 +176,27 @@ export default function FoodDetail({ item, user, onClose, onAddToCart, breakpoin
     setSubmitError('');
     setSubmitLoading(true);
     try {
+      const reviewPayload = HAS_BACKEND_API
+        ? {
+            user_id: user.id,
+            menu_item_id: item.id,
+            rating,
+            comment,
+            reviewer_name: user.name,
+          }
+        : {
+            user_id: user.id,
+            menu_item_id: item.id,
+            rating,
+            review_text: comment,
+          };
       const res = await fetch(HAS_BACKEND_API ? `${API_BASE}/api/reviews` : `${SUPABASE_URL}/rest/v1/reviews`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(HAS_BACKEND_API ? {} : { ...SUPABASE_HEADERS, Prefer: 'return=representation' }),
         },
-        body: JSON.stringify({
-          user_id: user.id,
-          menu_item_id: item.id,
-          rating,
-          comment,
-          reviewer_name: user.name,
-        }),
+        body: JSON.stringify(reviewPayload),
       });
       if (!res.ok) throw new Error('Failed to submit');
       setSubmitSuccess(true);
@@ -191,12 +204,18 @@ export default function FoodDetail({ item, user, onClose, onAddToCart, breakpoin
       setComment('');
       window.dispatchEvent(new Event('kapi_menu_updated'));
       // Refresh reviews
-      const updated = await fetch(HAS_BACKEND_API ? `${API_BASE}/api/reviews/${item.id}` : `${SUPABASE_URL}/rest/v1/reviews?select=*&menu_item_id=eq.${encodeURIComponent(item.id)}`, {
+      const updated = await fetch(HAS_BACKEND_API ? `${API_BASE}/api/reviews/${item.id}` : `${SUPABASE_URL}/rest/v1/reviews?select=*,users(name)&menu_item_id=eq.${encodeURIComponent(item.id)}`, {
         headers: HAS_BACKEND_API ? undefined : SUPABASE_HEADERS,
       })
         .then((r) => r.ok ? r.json() : [])
         .catch(() => []);
-      setReviews(updated && Array.isArray(updated.reviews) ? updated.reviews : (Array.isArray(updated) ? updated : []));
+      
+      const list = updated && Array.isArray(updated.reviews) ? updated.reviews : (Array.isArray(updated) ? updated : []);
+      setReviews(list.map((r) => ({
+        ...r,
+        comment: r.comment ?? r.review_text ?? '',
+        reviewer_name: r.reviewer_name ?? r.users?.name ?? 'Anonymous',
+      })));
     } catch {
       setSubmitError('Something went wrong. Please try again.');
     } finally {

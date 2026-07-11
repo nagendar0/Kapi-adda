@@ -1924,10 +1924,10 @@ def _chat_assistant_logic(msg: str, user_id: Optional[str], session_id: Optional
     # 0. PLAN MODE STATE MACHINE
     if "plan mode" in msg_clean or "help me plan" in msg_clean or "plan my meal" in msg_clean or "planner" in msg_clean or msg_clean == "plan":
         plan_mode_store[session_key] = {"step": 1}
-        reply = "Welcome to **Plan Mode**! 📋 Let's build your perfect custom meal combination under budget.\n\n**Step 1 of 6**: What is your mood now?"
+        reply = "Welcome to **Plan Mode**! 📋 Let's build your perfect custom meal combination under budget.\n\n**Step 1 of 5**: What is your mood now?"
         return {
             "reply": reply,
-            "options": ["😀 Happy", "😢 Sad", "😠 Angry", "😨 Scared", "😌 Calm", "😴 Tired", "😕 Confused", "🤩 Excited"],
+            "options": ["Happy", "Calm", "Tired", "Hungry", "Excited"],
             "items": []
         }
         
@@ -1941,7 +1941,7 @@ def _chat_assistant_logic(msg: str, user_id: Optional[str], session_id: Optional
             mood_clean = re.sub(r'[^\w\s]', '', mood_input).strip().lower()
             state["mood"] = mood_clean
             state["step"] = 2
-            reply = f"Got it, feeling **{mood_input}**! 🌟\n\n**Step 2 of 6**: What type of food are you in the mood for?"
+            reply = f"Got it, feeling **{mood_input}**! 🌟\n\n**Step 2 of 5**: What type of food are you in the mood for?"
             return {"reply": reply, "options": ["Veg 🌿", "Non-Veg 🍗", "Sweet 🍰", "Drink ☕", "Anything 🍽️"], "items": []}
             
         # Step 2: Taste selection
@@ -1959,7 +1959,7 @@ def _chat_assistant_logic(msg: str, user_id: Optional[str], session_id: Optional
                 
             state["taste"] = taste
             state["step"] = 3
-            reply = f"Got it, **{taste.capitalize()}** options! 🍽️\n\n**Step 3 of 6**: Select your flavor profile preference:"
+            reply = f"Got it, **{taste.capitalize()}** options! 🍽️\n\n**Step 3 of 5**: Select your flavor profile preference:"
             return {"reply": reply, "options": ["Spicy 🌶️", "Mild / Sweet 🍯", "No Preference 🍽️"], "items": []}
             
         # Step 3: Flavor profile selection
@@ -1973,23 +1973,11 @@ def _chat_assistant_logic(msg: str, user_id: Optional[str], session_id: Optional
                 
             state["flavor"] = flavor
             state["step"] = 4
-            reply = f"Got it, **{flavor_input}** preference! 🌟\n\n**Step 4 of 6**: Would you like to try something **New** (our latest unrated products) or stick to our **Crowd Favorites** (popular highest-rated items)?"
-            return {"reply": reply, "options": ["Crowd Favorites 🌟", "New Products ✨"], "items": []}
-            
-        # Step 4: New vs Popular selection
-        elif step == 4:
-            new_input = msg_clean
-            new_only = False
-            if "new" in new_input or "fresh" in new_input or "unrated" in new_input:
-                new_only = True
-                
-            state["new_only"] = new_only
-            state["step"] = 5
-            reply = "Awesome! 🌟\n\n**Step 5 of 6**: How many members are in your party?"
+            reply = f"Got it, **{flavor_input}** preference! 🌶️🍯\n\n**Step 4 of 5**: How many members are in your party?"
             return {"reply": reply, "options": ["1 Person 👤", "2 People 👥", "3 People 👥✨", "4+ People 🌟"], "items": []}
             
-        # Step 5: Party size selection
-        elif step == 5:
+        # Step 4: Party size selection
+        elif step == 4:
             party_input = msg_clean
             party_match = re.search(r'\d+', party_input)
             members = 1
@@ -2005,19 +1993,19 @@ def _chat_assistant_logic(msg: str, user_id: Optional[str], session_id: Optional
                 members = 4
                 
             state["members"] = members
-            state["step"] = 6
-            reply = f"Got it, ordering for **{members}** people! 👥\n\n**Step 6 of 6**: Finally, how much money do you have to spend today? 💰 (Please enter your budget in rupees in the input box below)"
-            return {"reply": reply, "options": [], "items": []}
+            state["step"] = 5
+            reply = f"Got it, ordering for **{members}** people! 👥\n\n**Step 5 of 5**: Finally, how much money do you have to spend today? 💰 (Please enter your budget in rupees in the input box below)"
+            return {"reply": reply, "options": ["Rs.50", "Rs.100", "Rs.150", "Rs.200"], "items": []}
             
-        # Step 6: Budget entry & combo generation
-        elif step == 6:
+        # Step 5: Budget entry & combo generation
+        elif step == 5:
             budget_match = re.search(r'\d+', msg_clean)
             if not budget_match:
                 return {"reply": "Oops! Please enter a valid number for your budget (e.g. 150).", "items": []}
             budget = float(budget_match.group(0))
             
             taste = state.get("taste", "anything")
-            new_only = state.get("new_only", False)
+            new_only = False
             mood = state.get("mood", "calm")
             flavor = state.get("flavor", "no_preference")
             members = int(state.get("members", 1))
@@ -2059,7 +2047,7 @@ def _chat_assistant_logic(msg: str, user_id: Optional[str], session_id: Optional
                 budget = float(state.get("temp_budget", 100))
                 members = int(state.get("temp_members", 1))
                 taste = state.get("taste", "anything")
-                new_only = state.get("new_only", False)
+                new_only = False
                 mood = state.get("mood", "calm")
                 flavor = state.get("flavor", "no_preference")
                 
@@ -2069,8 +2057,8 @@ def _chat_assistant_logic(msg: str, user_id: Optional[str], session_id: Optional
                 # Generate shared combo for total budget
                 return generate_combos_logic(budget, members, taste, new_only, mood, flavor, processed_items, is_shared=True)
             else:
-                # Go back to step 6
-                state["step"] = 6
+                # Go back to step 5
+                state["step"] = 5
                 reply = "No problem! ❌ Please enter a new higher budget in rupees to divide among your group (e.g. 250):"
                 return {"reply": reply, "options": [], "items": []}
 
@@ -2401,6 +2389,72 @@ def _chat_assistant_logic(msg: str, user_id: Optional[str], session_id: Optional
         if not res:
             res = [i for i in processed_items if i.get("availability_status") != "out_of_stock"][:limit]
         return res
+
+    # 1.5. DYNAMIC FOOD ITEM AND CATEGORY PARSING (to prevent same repetitive replies)
+    
+    # Specific Item Check
+    matched_item = None
+    for item in processed_items:
+        if item["name"].lower() in msg_clean:
+            matched_item = item
+            break
+            
+    if matched_item:
+        # Check price query
+        if any(w in msg_clean for w in ["price", "cost", "how much", "rupee", "rs", "₹"]):
+            reply = f"The price of **{matched_item['name']}** is **₹{matched_item['price']:.0f}**. It is currently **{matched_item.get('availability_status', 'available')}**."
+            return {"reply": reply, "items": [matched_item]}
+            
+        # Check reviews query
+        if any(w in msg_clean for w in ["review", "rating", "star", "comment", "feedback"]):
+            rating_count = matched_item.get("rating_count", 0)
+            avg_rating = matched_item.get("rating", 0.0)
+            reply = f"**{matched_item['name']}** has a customer rating of **{avg_rating}**★ ({rating_count} reviews). It is a popular item in our menu!"
+            return {"reply": reply, "items": [matched_item]}
+            
+        # Check availability query
+        if any(w in msg_clean for w in ["available", "stock", "have", "buy", "get"]):
+            status = "in stock and ready to order" if matched_item.get("availability_status") == "available" else "currently out of stock"
+            reply = f"Yes, we have **{matched_item['name']}**! It is {status} for **₹{matched_item['price']:.0f}**."
+            return {"reply": reply, "items": [matched_item]}
+            
+        # General item query
+        reply = f"**{matched_item['name']}** is a popular item priced at **₹{matched_item['price']:.0f}** (Status: **{matched_item.get('availability_status', 'available')}**). \n\n*Description*: {matched_item.get('description', 'No description available.')}"
+        return {"reply": reply, "items": [matched_item]}
+
+    # Category Checks
+    matched_cat = None
+    for cat in ["snacks", "cakes", "hot beverages", "puffs", "ice creams", "coolers", "milk shakes", "shakes", "juices"]:
+        if cat in msg_clean:
+            matched_cat = cat
+            break
+            
+    if matched_cat:
+        cat_items = [
+            i for i in processed_items 
+            if matched_cat in i.get("category", "").lower() or (matched_cat == "shakes" and "milk shakes" in i.get("category", "").lower())
+        ]
+        if cat_items:
+            items_list_str = ", ".join([f"**{i['name']}** (₹{i['price']:.0f})" for i in cat_items[:5]])
+            reply = f"In our **{cat_items[0]['category']}** section, we have: {items_list_str}."
+            return {"reply": reply, "items": cat_items[:4]}
+
+    # Vegetarian Filter Check
+    if any(w in msg_clean for w in ["vegetarian", "pure veg", "veg options"]):
+        def is_veg(item):
+            v = item.get("is_veg")
+            if v is False or v == "false" or v == 0:
+                return False
+            if v is True or v == "true" or v == 1:
+                return True
+            txt = f"{item['name']} {item.get('description', '')}".lower()
+            return not any(kw in txt for kw in ["chicken", "egg", "prawn", "fish", "meat", "mutton"])
+            
+        veg_items = [i for i in processed_items if is_veg(i) and i.get("availability_status") == "available"]
+        if veg_items:
+            items_list_str = ", ".join([f"**{i['name']}** (₹{i['price']:.0f})" for i in veg_items[:5]])
+            reply = f"Here are some delicious vegetarian options available right now: {items_list_str}."
+            return {"reply": reply, "items": veg_items[:4]}
 
     # A. Weather & Conditions Checks
     if any(w in msg_clean for w in ["cold", "chilly", "winter", "freeze", "cool", "snow", "weather"]):
