@@ -444,6 +444,102 @@ const selectByTerms = (items, terms) => items.filter((item) => {
   return terms.some((term) => text.includes(term));
 });
 
+function generateComboOptions(availableItems, budget, members, mood) {
+  const budgetPerPerson = Math.floor(budget / members);
+  if (budgetPerPerson <= 0) return [];
+
+  const items = [...availableItems].filter(item => itemPrice(item) <= budgetPerPerson);
+  if (items.length === 0) return [];
+
+  const combos = [];
+
+  const isDuplicate = (itemIds) => {
+    const sortedIds = [...itemIds].sort().join(',');
+    return combos.some(c => c.itemIds.sort().join(',') === sortedIds);
+  };
+
+  // 1-item combos
+  for (const item of items) {
+    const cost = itemPrice(item);
+    if (cost <= budgetPerPerson) {
+      combos.push({
+        items: [item],
+        costPerPerson: cost,
+        itemIds: [item.id]
+      });
+    }
+  }
+
+  // 2-item combos
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i; j < items.length; j++) {
+      const cost = itemPrice(items[i]) + itemPrice(items[j]);
+      if (cost <= budgetPerPerson) {
+        const itemIds = [items[i].id, items[j].id];
+        if (!isDuplicate(itemIds)) {
+          combos.push({
+            items: [items[i], items[j]],
+            costPerPerson: cost,
+            itemIds
+          });
+        }
+      }
+    }
+  }
+
+  // 3-item combos (if safety condition met to prevent CPU spikes)
+  if (items.length < 40) {
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i; j < items.length; j++) {
+        for (let k = j; k < items.length; k++) {
+          const cost = itemPrice(items[i]) + itemPrice(items[j]) + itemPrice(items[k]);
+          if (cost <= budgetPerPerson) {
+            const itemIds = [items[i].id, items[j].id, items[k].id];
+            if (!isDuplicate(itemIds)) {
+              combos.push({
+                items: [items[i], items[j], items[k]],
+                costPerPerson: cost,
+                itemIds
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const scoredCombos = combos.map(combo => {
+    const totalCost = combo.costPerPerson * members;
+    const diff = budget - totalCost; // lower diff is better
+    
+    // Average rating
+    const avgRating = combo.items.reduce((sum, item) => sum + (item.rating || 0), 0) / combo.items.length;
+    
+    // Mood matching score
+    let moodScore = 0;
+    if (mood) {
+      const moodLower = mood.toLowerCase();
+      combo.items.forEach(item => {
+        const itemText = `${item.name} ${item.description} ${item.category}`.toLowerCase();
+        if (itemText.includes(moodLower)) moodScore += 5;
+      });
+    }
+
+    const uniqueCats = new Set(combo.items.map(item => item.category)).size;
+    const score = -(diff * 1.5) + (avgRating * 12) + (moodScore * 5) + (uniqueCats * 10);
+
+    return {
+      ...combo,
+      score,
+      totalCost,
+      changeLeft: diff
+    };
+  });
+
+  scoredCombos.sort((a, b) => b.score - a.score);
+  return scoredCombos.slice(0, 3);
+}
+
 function buildLocalAssistantReply({ query, menuItems, mode, planner }) {
   const normalized = String(query || '').trim().toLowerCase();
   const allItems = asFlatMenu(menuItems);
@@ -560,14 +656,13 @@ function buildLocalAssistantReply({ query, menuItems, mode, planner }) {
       choices = selectByTerms(choices, ['sweet', 'chocolate', 'vanilla', 'mango', 'banana', 'rose', 'mild']);
     }
 
-    const budgetPerPerson = budget / members;
-    let personalChoices = choices.filter((item) => itemPrice(item) <= budgetPerPerson);
-    if (!personalChoices.length) {
-      personalChoices = available.filter((item) => itemPrice(item) <= budgetPerPerson);
+    const budgetPerPerson = Math.floor(budget / members);
+    let options = generateComboOptions(choices, budget, members, mood);
+    if (options.length === 0) {
+      options = generateComboOptions(available, budget, members, mood);
     }
 
-    const recommendations = rankItems(personalChoices, mood).slice(0, 3);
-    if (!recommendations.length) {
+    if (options.length === 0) {
       return {
         reply: `I couldn't find available items within your budget of ₹${budgetPerPerson} per person. Try a higher budget and let's plan again!`,
         items: [],
@@ -575,22 +670,34 @@ function buildLocalAssistantReply({ query, menuItems, mode, planner }) {
       };
     }
 
-    const totalCostPerPerson = recommendations.reduce((sum, item) => sum + itemPrice(item), 0);
-    const totalCost = totalCostPerPerson * members;
-    const changeLeft = budget - totalCost;
-
-    let tableReply = `🎉 **Meal Plan Generated (Total Budget: ₹${budget})** 🎉\n\n`;
-    tableReply += `I have created a combo for your party of ${members} under the budget:\n\n`;
-    tableReply += `| Combo Name | Items Included | Total | Change Left |\n`;
+    let tableReply = `🎉 **Meal Plan Options Generated (Total Budget: ₹${budget})** 🎉\n\n`;
+    tableReply += `I have created the best budget-compliant combo options for your party of ${members}:\n\n`;
+    tableReply += `| Option Name | Items Included | Total Cost | Change Left |\n`;
     tableReply += `| :--- | :--- | :--- | :--- |\n`;
-    
-    const itemsStr = recommendations.map((item) => `${members > 1 ? `${members} x ` : ''}${item.name} (₹${itemPrice(item)} each)`).join(' + ');
-    tableReply += `| **Custom Planner Combo** | {itemsStr} | **₹${totalCost}** | ₹${changeLeft} |\n\n`;
-    tableReply += `I've loaded the product cards for these items below. Just click on any card to view its details or add it to your cart! 🛵✨`;
+
+    options.forEach((opt, idx) => {
+      let optionName = `Option ${idx + 1}`;
+      if (opt.items.length === 1) optionName += ` (Single Delight)`;
+      else if (opt.items.length === 2) optionName += ` (Perfect Pair)`;
+      else optionName += ` (Feast Combo)`;
+
+      const itemsStr = opt.items.map((item) => `${members > 1 ? `${members} x ` : ''}${item.name} (₹${itemPrice(item)} each)`).join(' + ');
+      tableReply += `| **${optionName}** | ${itemsStr} | **₹${opt.totalCost}** | ₹${opt.changeLeft} |\n`;
+    });
+
+    tableReply += `\nI've loaded the product cards for these items below. Just click on any card to view its details or add it to your cart! 🛵✨`;
+
+    const uniqueItemsMap = new Map();
+    options.forEach(opt => {
+      opt.items.forEach(item => {
+        uniqueItemsMap.set(item.id, item);
+      });
+    });
+    const uniqueItemsList = Array.from(uniqueItemsMap.values());
 
     return {
-      reply: tableReply.replace('{itemsStr}', itemsStr),
-      items: recommendations,
+      reply: tableReply,
+      items: uniqueItemsList,
       options: ['Plan another meal', 'Explorer Mode'],
     };
   }
