@@ -710,7 +710,7 @@ function buildLocalAssistantReply({ query, menuItems, mode, planner }) {
   }
 
   return {
-    reply: `I can help you check menu prices, view reviews, find vegetarian choices, or plan a group combo in **Meal Planner Mode**! 📋 \n\nWhat can I help you find today?`,
+    reply: `I can help you check menu prices, view reviews, and find vegetarian choices here in **Explorer Mode**! 🔍 Or you can switch to **Plan Mode** to plan a group combo under budget.\n\nWhat can I help you find today?`,
     items: featured.slice(0, 3),
     options: ['It is cold outside', 'Vegetarian options', 'Under Rs.100', 'Recommend a special'],
   };
@@ -900,7 +900,7 @@ export default function AIAssistant({
       const initMsg = {
         id: 'init_planner',
         role: 'bot',
-        text: "Welcome to **Meal Planner Mode**! 📋 Let's build your perfect custom meal combination under budget. \n\n**Step 1 of 5**: What is your mood now?",
+        text: "Welcome to **Plan Mode**! 📋 Let's build your perfect custom meal combination under budget. \n\n**Step 1 of 5**: What is your mood now?",
         items: [],
         options: ["😀 Happy", "😢 Sad", "😠 Angry", "😨 Scared", "😌 Calm", "😴 Tired", "😕 Confused", "🤩 Excited"],
         timestamp: new Date(),
