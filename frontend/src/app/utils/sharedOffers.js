@@ -1,5 +1,5 @@
-const SUPABASE_URL = 'https://kvjvnrktnkenlsaatmxq.supabase.co';
-const SUPABASE_ANON_KEY = "sb_publishable_-9vJtAUFRJ6NnjrIvpTOwQ_QDzOjrUt";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
 export const OFFER_CONFIG_CATEGORY_NAME = '__kapi_daily_offers__';
 

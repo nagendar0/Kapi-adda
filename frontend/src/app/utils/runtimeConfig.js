@@ -5,8 +5,8 @@ const trimTrailingSlash = (value = '') => value.replace(/\/+$/, '');
 export const API_BASE = trimTrailingSlash(process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000');
 export const HAS_BACKEND_API = true;
 
-export const SUPABASE_URL = trimTrailingSlash(process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kvjvnrktnkenlsaatmxq.supabase.co');
-export const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_-9vJtAUFRJ6NnjrIvpTOwQ_QDzOjrUt';
+export const SUPABASE_URL = trimTrailingSlash(process.env.NEXT_PUBLIC_SUPABASE_URL || '');
+export const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 export const HAS_SUPABASE = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
 export const SUPABASE_HEADERS = HAS_SUPABASE

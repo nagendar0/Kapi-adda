@@ -9,8 +9,8 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefine
   ? (['localhost', '127.0.0.1'].includes(window.location.hostname) ? 'http://127.0.0.1:8000' : '')
   : 'http://127.0.0.1:8000');
 const HAS_BACKEND_API = true;
-const SUPABASE_URL = 'https://kvjvnrktnkenlsaatmxq.supabase.co';
-const SUPABASE_ANON_KEY = "sb_publishable_-9vJtAUFRJ6NnjrIvpTOwQ_QDzOjrUt";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const SUPABASE_HEADERS = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` };
 
 

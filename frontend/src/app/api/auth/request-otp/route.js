@@ -3,8 +3,8 @@ import nodemailer from 'nodemailer';
 
 export const runtime = 'nodejs';
 
-const SUPABASE_URL = "https://kvjvnrktnkenlsaatmxq.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_-9vJtAUFRJ6NnjrIvpTOwQ_QDzOjrUt";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
 const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);

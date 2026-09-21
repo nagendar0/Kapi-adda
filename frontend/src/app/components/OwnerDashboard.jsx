@@ -11,8 +11,8 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefine
   : 'http://127.0.0.1:8000');
 const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && !window.location.hostname.includes('.vercel.app'));
 
-const SUPABASE_URL = "https://kvjvnrktnkenlsaatmxq.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_-9vJtAUFRJ6NnjrIvpTOwQ_QDzOjrUt";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
 const COLORS = {
   bg: '#0a0702',

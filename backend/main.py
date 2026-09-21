@@ -42,8 +42,9 @@ import requests
 
 class SupabaseClient:
     def __init__(self):
-        self.url = "https://kvjvnrktnkenlsaatmxq.supabase.co/rest/v1"
-        self.anon_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2anZucmt0bmtlbmxzYWF0bXhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo"
+        supabase_base = os.getenv("SUPABASE_URL", "").rstrip("/")
+        self.url = f"{supabase_base}/rest/v1" if supabase_base else ""
+        self.anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
         # Set up a requests.Session with connection pooling
         self.session = requests.Session()
         adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20)
