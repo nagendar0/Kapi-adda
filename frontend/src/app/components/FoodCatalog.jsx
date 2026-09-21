@@ -9,7 +9,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefine
   : 'http://127.0.0.1:8000');
 const HAS_BACKEND_API = Boolean(process.env.NEXT_PUBLIC_API_URL) || (typeof window !== 'undefined' && !window.location.hostname.includes('.vercel.app'));
 const SUPABASE_URL = 'https://kvjvnrktnkenlsaatmxq.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2anZucmt0bmtlbmxzYWF0bXhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo';
+const SUPABASE_ANON_KEY = 'sb_publishable_-9vJtAUFRJ6NnjrIvpTOwQ_QDzOjrUt';
 const SUPABASE_HEADERS = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` };
 
 
@@ -305,12 +305,20 @@ export default function FoodCatalog({ user, onViewFood, onAddToCart, cart, onOpe
 
   // Filters
   const [search, setSearch] = useState('');
+  const [searchDebounced, setSearchDebounced] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [priceRange, setPriceRange] = useState('all');
   const [availability, setAvailability] = useState('all');
+  const [vegOnly, setVegOnly] = useState(false);
   const [sort, setSort] = useState('rating');
 
   const [categoriesList, setCategoriesList] = useState([]);
+
+  // Debounced search
+  useEffect(() => {
+    const t = setTimeout(() => setSearchDebounced(search), 250);
+    return () => clearTimeout(t);
+  }, [search]);
 
   // Fetch menu
   const fetchMenu = async (isPolling = false) => {
@@ -402,9 +410,9 @@ export default function FoodCatalog({ user, onViewFood, onAddToCart, cart, onOpe
   const filteredItems = useMemo(() => {
     let items = [...menuItems];
 
-    // Search
-    if (search.trim()) {
-      const q = search.toLowerCase();
+    // Search (debounced)
+    if (searchDebounced.trim()) {
+      const q = searchDebounced.toLowerCase();
       items = items.filter(
         (i) =>
           i.name?.toLowerCase().includes(q) ||
@@ -426,6 +434,9 @@ export default function FoodCatalog({ user, onViewFood, onAddToCart, cart, onOpe
     // Availability
     if (availability === 'available') items = items.filter((i) => i.is_available !== false);
 
+    // Veg Only
+    if (vegOnly) items = items.filter((i) => (i.description || '').toLowerCase().includes('veg') || (i.name || '').toLowerCase().includes('veg') || (i.tags || []).some(t => (t || '').toLowerCase().includes('veg')));
+
     // Sort
     if (sort === 'rating') items.sort((a, b) => (b.rating || 0) - (a.rating || 0));
     else if (sort === 'price_asc') items.sort((a, b) => a.price - b.price);
@@ -433,7 +444,7 @@ export default function FoodCatalog({ user, onViewFood, onAddToCart, cart, onOpe
     else if (sort === 'name') items.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
     return items;
-  }, [menuItems, search, selectedCategory, priceRange, availability, sort]);
+  }, [menuItems, searchDebounced, selectedCategory, priceRange, availability, sort, vegOnly]);
 
   // Pill button style helper
   const pillStyle = (active) => ({
@@ -642,6 +653,17 @@ export default function FoodCatalog({ user, onViewFood, onAddToCart, cart, onOpe
             </button>
             <button onClick={() => setAvailability('available')} style={pillStyle(availability === 'available')}>
               ● Available Only
+            </button>
+
+            <div style={{ width: '1px', height: '20px', background: 'rgba(255,255,255,0.1)', margin: '0 4px' }} />
+
+            <button onClick={() => setVegOnly(!vegOnly)} style={{
+              ...pillStyle(vegOnly),
+              background: vegOnly ? 'linear-gradient(135deg, #22c55e, #16a34a)' : pillStyle(false).background,
+              borderColor: vegOnly ? '#22c55e' : pillStyle(false).border,
+              color: vegOnly ? '#fff' : pillStyle(false).color,
+            }}>
+              🌿 Veg Only
             </button>
           </div>
         </div>

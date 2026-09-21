@@ -9,7 +9,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefine
 const HAS_BACKEND_API = true;
 
 const SUPABASE_URL = "https://kvjvnrktnkenlsaatmxq.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2anZucmt0bmtlbmxzYWF0bXhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NTk4NjgsImV4cCI6MjA5NjEzNTg2OH0.FOB6qXDOcZ7L0pb_fI1z2ZGd3CGM-lvtfTw2FcKxHqo";
+const SUPABASE_ANON_KEY = "sb_publishable_-9vJtAUFRJ6NnjrIvpTOwQ_QDzOjrUt";
 
 
 // ─── Coffee bean SVG particle ────────────────────────────────────────────────
