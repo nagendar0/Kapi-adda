@@ -24,14 +24,21 @@ if os.path.exists(".env"):
 
 app = FastAPI(title="Kapi Adda Smart Restaurant API", version="1.0.0")
 
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "kapiadda@gmail.com").strip().lower()
+
 # Enable CORS for frontend integration
+allowed_origins_env = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+default_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://kapi-adda-frontend.vercel.app",
+]
+origins = list(dict.fromkeys(default_origins + allowed_origins_env))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
-    allow_origin_regex=r"https://.*\.vercel\.app|http://.*",
+    allow_origins=origins,
+    allow_origin_regex=r"^https:\/\/kapi-adda-frontend(-[a-zA-Z0-9_-]+)?\.vercel\.app$",
     allow_credentials=True,
     allow_headers=["*"],
     allow_methods=["*"],
@@ -322,8 +329,8 @@ def register_user(req: RegisterRequest):
     # Store simple hash (mock password hashing for prototype)
     hashed_pwd = f"pbkdf2_{req.password}"
     
-    # Determine role strictly: only kapiadda@gmail.com is admin
-    role = "admin" if email_normalized == "kapiadda@gmail.com" else "customer"
+    # Determine role strictly: only configured admin email is admin
+    role = "admin" if email_normalized == ADMIN_EMAIL else "customer"
     
     if existing:
         # User already exists - update password and name (acts as recovery/reset)
@@ -405,8 +412,8 @@ def login_user(req: LoginRequest):
     
     user = users[0]
     
-    # Strictly align role: only kapiadda@gmail.com can be admin
-    actual_role = "admin" if email_normalized == "kapiadda@gmail.com" else "customer"
+    # Strictly align role: only configured admin email can be admin
+    actual_role = "admin" if email_normalized == ADMIN_EMAIL else "customer"
     if user.get("role") != actual_role:
         try:
             db.request("PATCH", "users", params={"id": f"eq.{user['id']}"}, body={"role": actual_role})
@@ -414,13 +421,9 @@ def login_user(req: LoginRequest):
             print(f"Error updating user role in DB: {e}")
         user["role"] = actual_role
 
-    # Check simple hash (or static hash from seed)
+    # Check password hash
     expected_hash_pattern = f"pbkdf2_{req.password}"
-    # Seeded admin password is dummy hashed
-    if req.password == "kappiadmin" and user["password_hash"].startswith("$2b$"):
-        # Allow seeded admin to pass
-        pass
-    elif user["password_hash"] != expected_hash_pattern:
+    if user.get("password_hash") != expected_hash_pattern:
         raise HTTPException(status_code=401, detail="Invalid email or password.")
         
     # Get user preferences
@@ -898,8 +901,8 @@ def verify_admin(authorization: Optional[str] = Header(None)):
         raise HTTPException(status_code=401, detail="User not found.")
     
     user = users[0]
-    if user.get("email", "").strip().lower() != "kapiadda@gmail.com":
-        raise HTTPException(status_code=403, detail="Access denied. Only kapiadda@gmail.com is authorized to access admin resources.")
+    if user.get("email", "").strip().lower() != ADMIN_EMAIL and user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail=f"Access denied. Only {ADMIN_EMAIL} is authorized to access admin resources.")
     
     return user
 

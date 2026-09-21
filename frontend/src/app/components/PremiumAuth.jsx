@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useBreakpoint, useScreenProfile } from '../utils/responsive';
+import { ADMIN_EMAIL } from '../utils/runtimeConfig';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined'
   ? (['localhost', '127.0.0.1'].includes(window.location.hostname) ? 'http://127.0.0.1:8000' : '')
@@ -179,7 +180,7 @@ const buildAuthUser = async (user) => ({
   id: user.id,
   name: user.name || 'Kapi User',
   email: user.email,
-  role: String(user.email || '').toLowerCase() === 'kapiadda@gmail.com' ? 'admin' : (user.role || 'customer'),
+  role: String(user.email || '').toLowerCase() === ADMIN_EMAIL ? 'admin' : (user.role || 'customer'),
   preferences: await getSupabasePreferences(user.id),
 });
 
@@ -201,8 +202,7 @@ const loginWithSupabaseFallback = async (email, password) => {
   if (!user) throw new Error('Invalid email or password.');
 
   const expectedHash = `pbkdf2_${password}`;
-  const isSeededAdmin = user.role === 'admin' && password === 'kappiadmin' && String(user.password_hash || '').startsWith('$2b$');
-  if (!isSeededAdmin && user.password_hash !== expectedHash) {
+  if (user.password_hash !== expectedHash) {
     throw new Error('Invalid email or password.');
   }
 
@@ -215,7 +215,7 @@ const loginWithSupabaseFallback = async (email, password) => {
 
 const registerWithSupabaseFallback = async ({ name, email, password, brewTypes, milk, strength }) => {
   const normalized = String(email || '').trim().toLowerCase();
-  const role = normalized === 'kapiadda@gmail.com' ? 'admin' : 'customer';
+  const role = normalized === ADMIN_EMAIL ? 'admin' : 'customer';
   const existing = await getSupabaseUserByEmail(normalized);
   const userPayload = {
     name,

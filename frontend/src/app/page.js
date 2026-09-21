@@ -17,6 +17,8 @@ import {
   SUPABASE_ANON_KEY,
   SUPABASE_URL,
   deploymentConfigurationError,
+  ADMIN_EMAIL,
+  isAdminUser,
 } from "./utils/runtimeConfig";
 
 // Initialize Supabase Client
@@ -557,7 +559,7 @@ export default function Home() {
       try {
         const parsed = JSON.parse(cookieUser);
         setUser(parsed);
-        if (parsed.email?.toLowerCase() === "kapiadda@gmail.com") {
+        if (isAdminUser(parsed)) {
           setViewMode("admin");
         } else if (path === "onboarding") {
           setViewMode("onboarding");
@@ -757,7 +759,7 @@ export default function Home() {
       }
     } else {
       if (viewMode === "login") {
-        if (user.email?.toLowerCase() === "kapiadda@gmail.com") {
+        if (isAdminUser(user)) {
           setViewMode("admin");
         } else {
           setViewMode("customer");
@@ -858,7 +860,7 @@ export default function Home() {
 
   const handleHeaderProfileClick = () => {
     if (user) {
-      if (user.email?.toLowerCase() === "kapiadda@gmail.com") {
+      if (isAdminUser(user)) {
         setViewMode("admin");
         setAdminTab("profile");
       } else {
@@ -902,7 +904,7 @@ export default function Home() {
       if (res.ok) {
         showNotification("Login successful!");
         setUser(data.user);
-        if (data.user?.email?.toLowerCase() === "kapiadda@gmail.com") {
+        if (isAdminUser(data.user)) {
           setViewMode("admin");
           loadAdminDashboard();
         } else {
@@ -1325,7 +1327,7 @@ export default function Home() {
           <div className="flex items-center space-x-6">
             {user ? (
               <>
-                {user.email?.toLowerCase() === "kapiadda@gmail.com" && (
+                {isAdminUser(user) && (
                   <button 
                     onClick={() => setViewMode("admin")}
                     className={`font-semibold text-sm transition ${viewMode === "admin" ? "text-amber-500" : "text-stone-300 hover:text-amber-500"}`}
@@ -2174,7 +2176,7 @@ export default function Home() {
           onLoginSuccess={(userData) => {
             showNotification("Login successful!");
             setUser(userData);
-            if (userData?.email?.toLowerCase() === "kapiadda@gmail.com") {
+            if (isAdminUser(userData)) {
               setViewMode("admin");
               loadAdminDashboard();
             } else {

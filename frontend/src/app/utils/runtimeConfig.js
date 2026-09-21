@@ -15,3 +15,16 @@ export const SUPABASE_HEADERS = HAS_SUPABASE
 
 export const deploymentConfigurationError =
   'The app is not connected to its data service. Configure NEXT_PUBLIC_API_URL or both NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.';
+
+export const ADMIN_EMAIL = (process.env.NEXT_PUBLIC_ADMIN_EMAIL || 'kapiadda@gmail.com').trim().toLowerCase();
+
+export const isAdminUser = (userOrEmail) => {
+  if (!userOrEmail) return false;
+  if (typeof userOrEmail === 'string') {
+    return userOrEmail.trim().toLowerCase() === ADMIN_EMAIL;
+  }
+  return (
+    String(userOrEmail.email || '').trim().toLowerCase() === ADMIN_EMAIL ||
+    userOrEmail.role === 'admin'
+  );
+};
